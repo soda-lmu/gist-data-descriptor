@@ -1,0 +1,89 @@
+---
+title: "non_expert_annotations_data_wrangling"
+author: "Anna Steinberg"
+date: "2024-12-09"
+output: html_document
+---
+
+# Goal of script: Read every annotation file in a folder, extract metadata, and append all data into a single Excel file
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load libraries
+```{r}
+library(readxl)
+library(tidyverse)
+library(purrr)
+library(fs)
+```
+
+# Define the function to read and process one file
+```{r}
+# Function to process each file
+read_process_file <- function(file_path) {
+  print(file_path)
+  # Load the metadata rows
+  metadata_df <- read_excel(file_path, sheet = 1, range = cell_rows(1:8), col_names = FALSE, col_types = rep("text", 15))[1:4]
+  
+  # Pivot the metadata rows to a single row
+  metadata_df <- metadata_df %>% select(1,4) %>%
+    rename( "Variable" = 1, "Entry" = 2) %>% pivot_wider(names_from = Variable, values_from = Entry) %>%
+    mutate(`Annotator ID:` = as.numeric(`Annotator ID:`))
+  
+  # Set column_types to guarantee consistent loading of columns
+  column_types <- c("text", "text", "text", "numeric", "numeric", "text", rep("text", 19))
+  
+  # Load the main data, assuming the data starts after the metadata rows
+  data_df <- read_excel(file_path, skip = 8, col_types = column_types)
+  
+  # Combine with metadata
+  data_df <- bind_cols(data_df, metadata_df)
+  
+  # Remove rows without a row ID (assuming 'ID' is the first column after the header)
+  data_df <- data_df %>% filter(!is.na(.[[1]]))
+  
+  return(data_df)
+}
+```
+
+To test function: uncomment following line
+```{r}
+# read_process_file("../../data/raw/non_expert_annotations/acuity brands inc_2022_report_1.xlsx")
+```
+
+
+# Define function which loops through all files, reads data, concatenates and saves as csv
+````{r}
+process_excel_files <- function(folder_path, output_file_name) {
+  # Get all file names in the directory, filter out hidden files
+  file_paths <- fs::dir_ls(folder_path, type = "file")
+
+  # Map the function over all file paths, read and process each file
+  all_dataframes <- map_df(file_paths, read_process_file)
+  
+  # Split off unnecessary columns
+  all_dataframes <- all_dataframes %>% select(-c(34:40))
+  
+  # Determine the parent directory of the specified folder
+  parent_dir <- str_replace(folder_path, "raw", "processed")
+  fs::dir_create(parent_dir)  # Ensure directory exists
+  
+  # Construct the full path for the output file in the parent directory
+  output_file_path <- file.path(parent_dir, output_file_name)
+  
+  # Save the concatenated dataframe
+  write.csv(all_dataframes, output_file_path)
+  
+  return(all_dataframes)
+}
+```
+
+# Run the function to process all files in the specified folder
+```{r}
+folder_path <- "../../data/raw/non_expert_annotations/"
+output_file_name <- "non_expert_annotations_raw.csv"
+concatenated_df <- process_excel_files(folder_path, output_file_name)
+```
+
