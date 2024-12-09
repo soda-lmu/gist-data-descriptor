@@ -1,0 +1,179 @@
+---
+title: "gs6_expert_discussion_template"
+author: "Laia Domenceh Burin"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+## Goal of the script: Set up expert discussion template and transform reports that were analyzed by experts to template
+
+### Read input data and packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(openxlsx)
+
+expert_disagreement <- read.csv('../../data/templates/expert_disagreement.csv', check.names = FALSE)
+
+# Transformation for highlighting in Excel sheet
+expert_disagreement <- expert_disagreement %>% mutate(row_disagreement_value_unit_page_or_unclear = if_else(row_disagreement_value_unit_page_or_unclear ==  TRUE, 'yes', 'no'))
+
+# Filter for reports which contain disagreement
+expert_disagreement <- expert_disagreement %>% group_by(`Report Name`) %>% filter(any(row_disagreement_value_unit_page_or_unclear == 'yes')) %>% ungroup()
+
+template_table <- read_excel('../../data/templates/exp_discussion_template.xlsx',
+                            skip = 7)
+```
+
+# Create functions that fill the header and organize the header columns
+
+```{r}
+
+fill_template_header <- function(data = expert_disagreement){
+  
+  disagreement_header <- data %>%
+  select(1:6) %>%
+  group_by(`Report Name`) %>%
+  reframe(across(everything(), ~unique(.)))
+
+  return(disagreement_header)
+}
+
+rename_and_organize_header_columns <- function(header = disagreement_header){
+  
+    filled_header <- header %>%
+      rename_with(.cols = contains(".g1"), .fn = ~ str_replace(., "\\.g1$", " G1")) %>%
+      rename_with(.cols = contains(".g2"), .fn = ~ str_replace(., "\\.g2$", " G2")) %>%
+      pivot_longer(cols = c(1:6),
+                 names_to = ' ',
+                 values_to = '  ') %>%
+      
+    
+    return(filled_header)
+
+}
+```
+
+# Create functions that fill the table and organize the table columns
+
+```{r}
+fill_template_table <- function(template_table = template_table,
+                                data = expert_disagreement) {
+  
+  template_table <- template_table %>% select('LLM Year', 'LLM Scope',
+                          'True value', 'True unit',
+                          'Unresolvable',
+                          'True page', 'Comment')
+  
+  table_join <- template_table %>% full_join(data,
+                                           by = c('LLM Year', 'LLM Scope'))
+  
+  table_join <- table_join %>% filter(!is.na(ID))
+  
+
+  return(table_join)
+
+}
+
+rename_and_organize_table_columns <- function(data = filled_table){
+    
+      filled_table <- data %>% select(-starts_with("agreement")) %>% 
+        rename_with(.cols = ends_with(".g1"), .fn = ~ str_replace(., "\\.g1$", " G1")) %>%
+        rename_with(.cols = ends_with(".g2"), .fn = ~ str_replace(., "\\.g2$", " G2")) %>%
+        select(ID, `Page used`, starts_with('LLM'), 
+               starts_with('Value'), `True value`,
+               starts_with('Unit'), `True unit`,
+               starts_with('Corrected'), starts_with('Page corrected'), `True page`,
+               starts_with('Comment '), starts_with('Expert comment'),
+               starts_with('Unclear'),
+               Unresolvable, 
+               Comment,
+               row_disagreement_value_unit_page_or_unclear)
+    
+    return(filled_table)
+
+}
+
+```
+
+# Write output
+
+```{r}
+
+write_templates_per_doc <- function(filled_header,
+                                    filled_table){
+  
+  template_path <- '../../data/templates/exp_discussion_template.xlsx'
+
+  wb <- loadWorkbook(template_path)
+  
+  writeData(wb, sheet = "Tabelle1", 
+                      x = filled_header, 
+                      startCol = 1, startRow = 1, 
+                      colNames = FALSE, rowNames = FALSE)
+            
+  writeData(wb, sheet = "Tabelle1",
+            x = filled_table,
+            startCol = 1, startRow = 8,
+            colNames = TRUE, rowNames = FALSE)
+        
+  
+  doc_export_data <- filled_header %>% slice(1) %>% pull(2)
+      
+  folder_paths <- paste0("../../data/templates/filled_company_templates/expert_discussion/")
+  
+  for (i in 1:length(folder_paths)) {
+    if (!dir.exists(folder_paths[i])) {
+      dir.create(folder_paths[i], recursive = TRUE)
+      }
+    
+    saveWorkbook(wb, file = paste0(folder_paths[i], "/", str_replace(doc_export_data, "\\.pdf$", ""),".xlsx"), overwrite = TRUE)
+    }
+  
+}
+
+```
+
+# Run filler functions on templates and export all of them
+
+```{r}
+fill_and_export_templates_for_doc <- function(data = expert_disagreement, report){
+  
+  filtered_expert_disagreement <- data %>% filter(`Report Name` == report)
+  
+  filled_template_header <- fill_template_header(filtered_expert_disagreement)
+  
+  filled_template_header <- rename_and_organize_header_columns(filled_template_header)
+  
+  filled_template_table <- fill_template_table(template_table = template_table, data = filtered_expert_disagreement)
+  
+  filled_template_table <- rename_and_organize_table_columns(filled_template_table)
+  
+  write_templates_per_doc(filled_header = filled_template_header,
+                          filled_table = filled_template_table)
+}
+```
+
+# Run on all the reports
+
+```{r}
+# Get unique report names
+unique_reports <- unique(expert_disagreement$`Report Name`)
+
+# Apply the function on each unique report using walk()
+walk(unique_reports, ~ fill_and_export_templates_for_doc(data = expert_disagreement, report = .x))
+```
+
+# Run for reports missing in first round
+- aixtron_2020_report.pdf
+- dampskibsselskabet norden_2019_report.pdf	
+- polaris industries_2021_report.pdf	
+- smith (ds) plc_2021_report.pdf	
+
+```{r}
+reports_missing <- c('aixtron_2020_report.pdf', 'dampskibsselskabet norden_2019_report.pdf', 'polaris industries_2021_report.pdf', 'smith (ds) plc_2021_report.pdf')
+
+walk(reports_missing, ~ fill_and_export_templates_for_doc(data = expert_disagreement, report = .x))
+```
+

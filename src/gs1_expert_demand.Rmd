@@ -1,0 +1,69 @@
+---
+title: "b1_expert_demand"
+author: "Jacob Beck"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+## Goal of the script: Determine our expert demand. It is needed where a) asked for or b) meaningful disagreement.
+
+
+### Read data and packages
+
+```{r}
+#Packages
+library(tidyverse)
+```
+
+```{r}
+gs1 <- read.csv("../../data/processed/cleaned_data.csv")
+gs_pivot1 <- read.csv("../../data/processed/pivot_master.csv")
+```
+
+### Part a) Where did annotators ask for expert demand?
+
+```{r}
+exp_requested_document <- gs1 %>%
+  filter(document_expert_needed == "Yes") %>%
+  select(report_name) %>%
+  distinct()
+
+# Create a variable that marks whether the expert is needed (can be added with the computed expert demand) 
+# Needed if requested on doc level or if record_expert_needed == "Yes"
+
+gs_pivot2 <- gs_pivot1 %>%
+  mutate(expert_needed = ifelse(
+    test = (report_name %in% exp_requested_document$report_name | # expert needed if the report name is among the requested ones
+              rowSums(select(., starts_with("record_expert_needed")) == "Yes", na.rm = TRUE) > 0), # expert needed if at least one of the record needed cols contains "Yes" 
+    TRUE, FALSE))
+
+table(gs_pivot2$expert_needed)
+
+      
+```
+
+
+### Part b) Where do we have meaningful disagreement (in value or unit correct columns)?
+
+```{r}
+
+gs_pivot3 <- gs_pivot2 %>%
+  mutate(
+    expert_needed = ifelse(
+      agreement_value_and_unit == FALSE, # if either unit or value disagree
+    TRUE,expert_needed)) # then expert is needed. if not just keep the expert needed value from above (to not overwrite existing TRUEs)
+
+
+table(gs_pivot3$expert_needed)
+```
+
+```{r}
+gs_pivot3  %>% filter(expert_needed == T) %>% 
+  distinct(report_name)
+```
+
+Save data including expert_needed variable
+```{r}
+write.csv(gs_pivot3, "../../data/processed/gold_standard/pivot_expert_demand.csv")
+```
+

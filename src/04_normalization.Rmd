@@ -1,0 +1,108 @@
+---
+title: "04_normalization.Rmd"
+author: "Anna Steinberg"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Goal: Create dictionary for unit and value normalization from exploring the differences in the annotations
+
+```{r}
+library(tidyverse)
+```
+
+Read cleaned data
+```{r}
+df <- read.csv("../data/processed/cleaned_data.csv")
+```
+
+### Inspect unit column
+
+```{r}
+llm_units <- df %>% select(llm_unit) %>% distinct()
+corrected_units <- df %>% select(corrected_unit) %>% distinct()
+units <- llm_units %>% full_join(corrected_units, by = c("llm_unit" = "corrected_unit"))
+```
+
+Observations:
+- numeric normalisation needed: e.g. 10^3 => 1000
+- character normalisation, e.g. t-C02 => t C02, C02-e => C02 e, kt CO₂ eq => kt CO2 e
+- word normalisation, e.g. carbon dioxide => CO2; Metric/metric tons, tonnes, Tonnes => t; MT of CO2 e => MT CO2 e; thousand or in thousand => k, equivalents => e
+- MT can represent Megatonne or Metric tons ==> cannot unify
+- Aссording to https://en.wikipedia.org/wiki/Ton US tons are not the same as tonnes or metric tons. Only unify tonnes and metric tons, leave tons be.
+
+Goal:
+(k/m)t CO2(e)
+MT CO2(e)
+Kg CO2e
+...
+
+
+```{r}
+tons_str <- c("tonnes", "tonne", "Tonnes", "Tonne", "metric ton", "Metric ton", "Metric tons", "metric tons", "metric tonnes", "Metric tonnes", "metric t")
+ton_pattern <- paste0("\\b(", paste(tons_str, collapse = "|"), ")\\b")
+
+k_str <- c("10\\^3", "^thousand", "1,000", "1’000", "^Thousands")
+k_pattern <- paste0("\\b(", paste(k_str, collapse = "|"), ")\\b")
+
+kt_str <- c("kilotonnes", "metric kilotons", "kilotonne", "metric kiloton")
+kt_pattern <- paste0("\\b(", paste(kt_str, collapse = "|"), ")\\b")
+
+co2_str <- c("CO 2", "CO₂", "carbon dioxide", "C02")
+co2_pattern <- paste0("(", paste(co2_str, collapse = "|"), ")")
+
+eq_str <- c("equivalents?", "eqv", "eq\\.?")
+eq_pattern <- paste0("(", paste(eq_str, collapse = "|"), ")")
+
+units <- units %>% mutate(normalized = llm_unit,
+    normalized = str_replace_all(normalized, regex(ton_pattern, ignore_case = TRUE), "t"),
+    normalized = str_replace_all(normalized, regex(k_pattern, ignore_case = TRUE), "k"),
+    normalized = str_replace_all(normalized, regex(kt_pattern, ignore_case = TRUE), "kt"),
+    normalized = str_replace_all(normalized, regex(co2_pattern, ignore_case = TRUE), "CO2"),
+    normalized = str_replace_all(normalized, regex(eq_pattern, ignore_case = TRUE), "e"),
+    normalized = str_replace_all(normalized, fixed("of"), ""), 
+    normalized = str_replace_all(normalized, fixed(" emissions"), ""),
+    normalized = str_replace_all(normalized, fixed(" (t) "), ""),
+    normalized = str_replace_all(normalized, fixed(" (CO2e)"), ""),
+    normalized = str_replace_all(normalized, fixed("t CO2 e in thousands"), "kt CO2e"),
+    
+)
+
+
+```
+
+Remove space between "k" and "t", "CO2" and "e" and include space after "t" and "kt"
+```{r}
+
+units <- units %>% mutate(normalized = str_replace_all(normalized, "k t", "kt"),
+                          normalized = str_replace_all(normalized, regex("(CO2 e|CO2-e)"), "CO2e"),
+                          normalized = str_replace_all(normalized, regex("(-CO2|  CO2)"), " CO2"),
+                          normalized = str_replace_all(normalized, regex("ktCO2e", ignore_case = TRUE), "kt CO2e"),
+                          normalized = str_replace_all(normalized, regex("(MTCO2e|MT  CO2e)"), "MT CO2e"),
+                          normalized = str_replace_all(normalized, regex("(tCO2e|t  CO2e)"), "t CO2e"),
+                          normalized = str_replace_all(normalized, "Kg", "kg"),
+                          normalized = str_replace_all(normalized, "Kt", "kt"))
+
+
+```
+
+How many distinct versions of units are there?
+
+```{r}
+units %>% select(normalized) %>% distinct()
+```
+
+Create dictionary for unit normalization
+```{r}
+unit_dict <- units %>% select(llm_unit, normalized) %>% distinct() %>% rename(unit = llm_unit, normalized_unit = normalized)
+```
+
+Save dictionary to use when comparing llm and human annotated values
+```{r}
+write.csv(unit_dict, "../data/processed/unit_normalization.csv", row.names = FALSE)
+```
+

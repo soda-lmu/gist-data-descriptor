@@ -1,0 +1,67 @@
+---
+title: "01b_data_checks"
+author: "Anna Steinberg"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+### Load packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+### Data quality checks
+
+```{r}
+df <- read.csv("../data/processed/cleaned_data.csv")
+```
+
+1.  Does a report have more than 100 or less than 80 rows?
+
+```{r}
+df %>% group_by(report_name) %>% summarise(rows = n()) %>%
+  filter(rows < 80 | rows > 100) %>%
+  arrange(rows)
+```
+
+Manual inspection: in jetblue airways corp_2019_report.pdf LLM and annotators added a lot of rows.
+
+2.  Is report name, pages_searched, annotator ID or any of the doc level info missing?
+
+```{r}
+df %>% filter(is.na(report_name) | is.na(pages_searched) | is.na(annotator_ID))
+```
+
+3.  Do duplicate rows starting with "x" have different annotator IDs?
+
+```{r}
+df %>% group_by(ID, report_name) %>% 
+  filter(str_starts(ID, "x")) %>%
+  filter(n() > 1) %>%
+  summarise(distinct_annotators = n_distinct(annotator_ID))
+```
+
+4.  Does expert adjudication column contain missing values?
+
+```{r}
+df %>% filter(is.na(record_expert_needed) | is.na(document_expert_needed)) %>% group_by(annotator_ID) %>% summarise(nrows = n())
+```
+
+5.  Are there any discrepancies between x_correct and corrected_x for x value, unit, page?
+
+```{r}
+df %>% filter((value_correct == "Yes" | is.na(value_correct)) & !is.na(corrected_value))
+```
+
+```{r}
+df %>% filter((unit_correct == "Yes" | is.na(unit_correct)) & !is.na(corrected_unit))
+```
+
+```{r}
+df %>% filter((page_correct == "Yes" | is.na(page_correct)) & !is.na(corrected_page))
+```

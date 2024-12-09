@@ -1,0 +1,88 @@
+---
+title: "gs3_data_for_expert_annotation_version_1"
+author: "Anna Steinberg"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Goal of the script: For data requiring expert demand, create a dataset containing values and units given by respective annotators
+  
+### Read data and packages
+```{r}
+library(tidyverse)
+```
+
+### Read in data
+```{r}
+expert_demand <- read.csv("../../data/processed/gold_standard/pivot_expert_demand.csv")
+cleaned_data <- read.csv("../../data/processed/cleaned_data.csv")
+```
+### Merge corrected value and corrected unit columns and additional columns annotated by annotators to LLM outputs
+
+Pivot cleaned data to get 
+- two columns with corrected value 
+- two columns with corrected unit 
+- two columns with comment
+- two columns with document comment
+- two columns with document expert needed
+for each annotator of respective report
+
+```{r}
+source("../pivot.R")
+```
+
+```{r}
+# Variable list can be extended any time
+pivot_vars <- c("corrected_value", "corrected_unit", "page_correct", "corrected_page", "comment", "document_comment", "document_expert_needed")
+pivot_combined <- pivot_w_split(cleaned_data, pivot_vars)
+```
+
+Merge columns corrections to expert_demand
+```{r}
+expert_demand_merged <- expert_demand %>% select(-X, -X.1) %>%
+  left_join(pivot_combined, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID_1", "annotator_ID_2"))
+```
+
+Create new column "document_expert_requested_by_at_least_one_annotator" to indicate if at least one annotator requested an expert
+```{r}
+expert_demand_merged <- expert_demand_merged %>%
+  mutate(document_expert_requested_by_at_least_one_annotator = ifelse(rowSums(select(., contains("document_expert_needed")) == "Yes", na.rm = TRUE) > 0, "Yes", "No"))
+```
+
+Create new column "row_expert_requested_by_at_least_one_annotator_or_disagreement" to indicate if at least one annotator requested an expert on a specific row or there is a disagreement in that row (for color-coding in template)
+```{r}
+expert_demand_merged <- expert_demand_merged %>%
+  mutate(row_expert_requested_by_at_least_one_annotator_or_disagreement = ifelse(rowSums(select(., contains("record_expert_needed")) == "Yes", na.rm = TRUE) > 0 | agreement_value_and_unit == F, "Yes", "No"))
+```
+
+Select relevant columns
+```{r}
+expert_demand_merged <- expert_demand_merged %>%
+  select(report_name, starts_with("document_comment"), document_expert_requested_by_at_least_one_annotator, row_expert_requested_by_at_least_one_annotator_or_disagreement, ID, page_used, llm_year, llm_scope, llm_value, starts_with("value_correct"), starts_with("corrected_value"), llm_unit, starts_with("unit_correct"), starts_with("corrected_unit"), starts_with("corrected_page"), starts_with("comment"))
+```
+
+Save the dataset
+```{r}
+write.csv(expert_demand_merged, "../../data/processed/gold_standard/data_for_expert_annotation_w_lay_annotations.csv", row.names = FALSE)
+```
+
+List of report names for expert annotation
+```{r}
+reports_for_experts <- expert_demand_merged %>% filter(document_expert_requested_by_at_least_one_annotator == "Yes" | row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes") %>% distinct(report_name)
+```
+
+Order report column randomly
+```{r}
+set.seed(1)
+reports_for_experts <- reports_for_experts[sample(nrow(reports_for_experts)),]
+```
+
+Save list
+```{r}
+write.csv(reports_for_experts, "../../data/processed/gold_standard/report_names_for_expert_annotation.csv", row.names = FALSE)
+```
+
