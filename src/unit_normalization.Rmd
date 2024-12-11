@@ -9,7 +9,7 @@ output: distill::distill_article
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-### Goal: Create dictionary for unit and value normalization from exploring the differences in the annotations
+## Goal: Create dictionary for unit and value normalization from exploring the differences in the annotations
 
 ```{r}
 library(tidyverse)
@@ -17,7 +17,7 @@ library(tidyverse)
 
 Read cleaned data
 ```{r}
-df <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
+df <- read.csv("../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
 ```
 
 ### Inspect unit column
@@ -33,7 +33,7 @@ Observations:
 - character normalisation, e.g. t-C02 => t C02, C02-e => C02 e, kt CO₂ eq => kt CO2 e
 - word normalisation, e.g. carbon dioxide => CO2; Metric/metric tons, tonnes, Tonnes => t; MT of CO2 e => MT CO2 e; thousand or in thousand => k, equivalents => e
 - MT can represent Megatonne or Metric tons ==> cannot unify
-- Aссording to https://en.wikipedia.org/wiki/Ton US tons are not the same as tonnes or metric tons. Only unify tonnes and metric tons, leave tons be.
+- Aссording to https://en.wikipedia.org/wiki/Ton US tons are not the same as tonnes or metric tons. We only unify tonnes and metric tons and leave tons as is.
 
 Goal:
 (k/m)t CO2(e)

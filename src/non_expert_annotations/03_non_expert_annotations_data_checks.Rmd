@@ -15,13 +15,15 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 ```
 
-### Data quality checks
 
+### Load data
 ```{r}
 df <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
 ```
 
-1.  Does a report have more than 100 or less than 80 rows?
+## Data quality checks
+
+1.  Does a report have more than 100 or less than 80 rows? (we expect at least 80 rows per report due to 2 annotators * 4 scopes * 10 years = 80)
 
 ```{r}
 df %>% group_by(report_name) %>% summarise(rows = n()) %>%
@@ -29,9 +31,9 @@ df %>% group_by(report_name) %>% summarise(rows = n()) %>%
   arrange(rows)
 ```
 
-Manual inspection: in jetblue airways corp_2019_report.pdf LLM and annotators added a lot of rows.
+Manual inspection: in jetblue airways corp_2019_report.pdf LLM and annotators added a lot of rows. No annotation or processing error, no need to correct it.
 
-2.  Is report name, pages_searched, annotator ID or any of the doc level info missing?
+2.  Is report name, pages_searched, annotator ID or any of the doc level info missing? We expect no Missings.
 
 ```{r}
 df %>% filter(is.na(report_name) | is.na(pages_searched) | is.na(annotator_ID))
@@ -46,13 +48,13 @@ df %>% group_by(ID, report_name) %>%
   summarise(distinct_annotators = n_distinct(annotator_ID))
 ```
 
-4.  Does expert adjudication column contain missing values?
+4.  Does "expert adjudication needed" column contain missing values? It was mandatory for non-experts to provide an answer here. 
 
 ```{r}
 df %>% filter(is.na(record_expert_needed) | is.na(document_expert_needed)) %>% group_by(annotator_ID) %>% summarise(nrows = n())
 ```
 
-5.  Are there any discrepancies between x_correct and corrected_x for x value, unit, page?
+5.  Are there any discrepancies between x_correct and corrected_x for x = value, unit, page? If x_correct == "Yes" | NA the corrected_x column should always be NA. If it is already correct, correction is not needed.
 
 ```{r}
 df %>% filter((value_correct == "Yes" | is.na(value_correct)) & !is.na(corrected_value))
