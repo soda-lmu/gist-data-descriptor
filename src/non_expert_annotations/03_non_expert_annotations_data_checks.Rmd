@@ -1,5 +1,5 @@
 ---
-title: "01b_data_checks"
+title: "03_non_expert_annotations_data_checks"
 author: "Anna Steinberg"
 date: "`r Sys.Date()`"
 output: distill::distill_article
@@ -18,7 +18,7 @@ library(tidyverse)
 ### Data quality checks
 
 ```{r}
-df <- read.csv("../data/processed/cleaned_data.csv")
+df <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
 ```
 
 1.  Does a report have more than 100 or less than 80 rows?
