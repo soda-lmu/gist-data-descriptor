@@ -42,7 +42,7 @@ read_process_file <- function(file_path) {
   data_df <- bind_cols(data_df, metadata_df)
   
   # Remove rows without a row ID (assuming 'ID' is the first column after the header)
-  data_df <- data_df %>% filter(!is.na(.[[1]]))
+  data_df <- data_df %>% filter(!is.na(ID))
   
   return(data_df)
 }
@@ -74,7 +74,7 @@ process_excel_files <- function(folder_path, output_file_name) {
   output_file_path <- file.path(parent_dir, output_file_name)
   
   # Save the concatenated dataframe
-  write.csv(all_dataframes, output_file_path)
+  write.csv(all_dataframes, output_file_path, row.names = FALSE)
   
   return(all_dataframes)
 }
