@@ -39,11 +39,17 @@ pages_searched <- cleaned_data %>% select(report_name, pages_searched) %>% disti
 annotations <- left_join(annotations, pages_searched, by = c("report_name"))
 ```
 
+# Change ID column
+```{r}
+annotations <- annotations %>% 
+  mutate(non_exp_manually_added_record = ifelse(grepl("x", ID), TRUE, FALSE)) # manually added rows start with "x"
+```
+
+
 # Rename columns
 ```{r}
 annotations <- annotations %>% 
   rename(
-    llm_or_manual_id = ID, 
     llm_page = page_used,
     non_exp_1_id = annotator_ID_1,
     non_exp_2_id = annotator_ID_2,
@@ -162,4 +168,3 @@ annotations <- annotations %>% distinct() %>% arrange(company_name, report_year,
 ```{r}
 write.csv(annotations, "../../data/processed/gold_standard/annotation_dataset.csv", row.names = FALSE)
 ```
-
