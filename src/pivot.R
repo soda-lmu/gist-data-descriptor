@@ -30,18 +30,18 @@ pivot_w_split <- function(dataset, vars) {
   duplicates <- dataset %>% group_by(report_name, ID, page_used, llm_year, llm_scope, llm_value, llm_unit) %>% filter(n() > 1)
   
   # Now we pivot the duplicates first
-  pivot_corrections <- pivot_func(duplicates, pivot_vars) %>% arrange(report_name, ID, page_used, llm_year, llm_scope)
+  pivot_corrections <- pivot_func(duplicates, vars) %>% arrange(report_name, ID, page_used, llm_year, llm_scope)
   
   # Get the annotators for each report (for later joining)
   annotators <- pivot_corrections %>% select(report_name, annotator_ID_1, annotator_ID_2) %>% group_by(report_name) %>% summarise(annotator_ID_1 = first(annotator_ID_1), annotator_ID_2 = first(annotator_ID_2))
   
   # Now we pivot the non-duplicates
-  pivot_corrections_nd <- pivot_func(non_duplicates, pivot_vars) %>% arrange(report_name, ID, page_used, llm_year, llm_scope)
+  pivot_corrections_nd <- pivot_func(non_duplicates, vars) %>% arrange(report_name, ID, page_used, llm_year, llm_scope)
   
   # Split the non-duplicates into two columns using annotators
   pivot_corrections_nd <- pivot_corrections_nd %>% rename(annotator_ID = annotator_ID_1) %>%
     left_join(annotators, by = "report_name")
-  
+
   for (var in vars) {
     pivot_corrections_nd <- split_by_annotator(pivot_corrections_nd, "annotator_ID", "annotator_ID_1", var)
   }

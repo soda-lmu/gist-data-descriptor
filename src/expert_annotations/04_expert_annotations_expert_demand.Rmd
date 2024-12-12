@@ -1,0 +1,92 @@
+---
+title: "04_expert_annotations_expert_demand"
+author: "Jacob Beck"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+## Goal of the script: Determine our expert demand. It is needed where a) asked for or b) meaningful disagreement.
+
+
+### Read data and packages
+
+```{r}
+#Packages
+library(tidyverse)
+```
+
+```{r}
+# Read data
+df <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
+```
+
+To compute expert demand we need to pivot the data to have one row per report and then check where non-experts requested expert adjudication.
+
+```{r}
+source("../pivot.R")
+
+# variables which concern expert adjudication
+pivot_vars <- c("document_expert_needed", "record_expert_needed")
+df_pivot <- pivot_w_split(df, pivot_vars)
+```
+
+
+### Part a) Where did annotators ask for expert demand?
+
+```{r}
+exp_requested_document <- df_pivot %>%
+  filter(document_expert_needed_1 == "Yes" | document_expert_needed_2 == "Yes") %>%
+  select(report_name) %>%
+  distinct()
+
+# Create a variable that marks whether the expert is needed (can be added with the computed expert demand) 
+# Needed if requested on doc level or if record_expert_needed == "Yes"
+
+df2 <- df_pivot %>%
+  mutate(expert_needed = ifelse(
+    test = (report_name %in% exp_requested_document$report_name | # expert needed if the report name is among the requested ones
+              rowSums(select(., starts_with("record_expert_needed")) == "Yes", na.rm = TRUE) > 0), # expert needed if at least one of the record needed cols contains "Yes" 
+    TRUE, FALSE))
+
+table(df2$expert_needed)
+```
+
+
+### Part b) Where do we have meaningful disagreement (in value or unit correct columns)?
+
+To compute disagreement, we need to pivot our cleaned data using value_correct and unit_correct as pivot variables and then compute agreement between the two non-experts for these variables. 
+```{r}
+# Pivot data
+pivot_vars_2 <- c("value_correct", "unit_correct")
+df3 <- pivot_w_split(df, pivot_vars_2)
+
+# Compute agreement for each variable individually
+df3 <- agreement_func(df3, "value_correct")
+df3 <- agreement_func(df3, "unit_correct")
+
+# Compute combined agreement
+df3$agreement_value_and_unit <- df3$agreement_value_correct & df3$agreement_unit_correct
+
+# Join new variables to data containing expert_needed variable
+df4 <- left_join(df2, df3, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID_1", "annotator_ID_2"))
+
+# Compute expert demand by including disagreement
+df4 <- df4 %>%
+  mutate(
+    expert_needed = ifelse(
+      agreement_value_and_unit == FALSE, # if either unit or value disagree
+    TRUE, expert_needed)) # then expert is needed. if not just keep the expert needed value from above (to not overwrite existing TRUEs)
+
+table(df4$expert_needed)
+```
+
+```{r}
+df4  %>% filter(expert_needed == T) %>% 
+  distinct(report_name)
+```
+
+Save data including expert_needed variable
+```{r}
+write.csv(df4, "../../data/processed/expert_annotations/expert_demand.csv")
+```
+
