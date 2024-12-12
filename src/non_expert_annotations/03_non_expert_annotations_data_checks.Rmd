@@ -39,14 +39,15 @@ Manual inspection: in jetblue airways corp_2019_report.pdf LLM and annotators ad
 df %>% filter(is.na(report_name) | is.na(pages_searched) | is.na(annotator_ID))
 ```
 
-3.  Do duplicate rows starting with "x" have different annotator IDs?
+3.  Did only one or both annotators add rows manually? If the annotation convention is clearly enough defined, we would expect both annotators to add rows manually. 
 
 ```{r}
 df %>% group_by(ID, report_name) %>% 
   filter(str_starts(ID, "x")) %>%
-  filter(n() > 1) %>%
-  summarise(distinct_annotators = n_distinct(annotator_ID))
+  summarise(distinct_annotators = n_distinct(annotator_ID)) %>%
+  arrange(desc(distinct_annotators))
 ```
+However, only three records were added by both annotators. So annotation convention needs to be refined.
 
 4.  Does "expert adjudication needed" column contain missing values? It was mandatory for non-experts to provide an answer here. 
 
