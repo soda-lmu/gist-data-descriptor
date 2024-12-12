@@ -35,14 +35,14 @@ Observations:
 - MT can represent Megatonne or Metric tons ==> cannot unify
 - Aссording to https://en.wikipedia.org/wiki/Ton US tons are not the same as tonnes or metric tons. We only unify tonnes and metric tons and leave tons as is.
 
-Goal:
-(k/m)t CO2(e)
-MT CO2(e)
-Kg CO2e
-...
+Our goal is to normalize the units so that we get the following variations:
+- t CO2, t CO2e, kt CO2, kt CO2e, mt CO2, mt CO2e
+- MT CO2e, MT CO2
+- Kg CO2e
 
-
+Map all variations to a common entry
 ```{r}
+# We first define the potential diverse patterns for the different components of unit which should be mapped to one common entry
 tons_str <- c("tonnes", "tonne", "Tonnes", "Tonne", "metric ton", "Metric ton", "Metric tons", "metric tons", "metric tonnes", "Metric tonnes", "metric t")
 ton_pattern <- paste0("\\b(", paste(tons_str, collapse = "|"), ")\\b")
 
@@ -58,6 +58,7 @@ co2_pattern <- paste0("(", paste(co2_str, collapse = "|"), ")")
 eq_str <- c("equivalents?", "eqv", "eq\\.?")
 eq_pattern <- paste0("(", paste(eq_str, collapse = "|"), ")")
 
+# We search for the patterns and replace by common normalized entry
 units <- units %>% mutate(normalized = llm_unit,
     normalized = str_replace_all(normalized, regex(ton_pattern, ignore_case = TRUE), "t"),
     normalized = str_replace_all(normalized, regex(k_pattern, ignore_case = TRUE), "k"),
