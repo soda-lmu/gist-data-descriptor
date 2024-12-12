@@ -87,6 +87,6 @@ df4  %>% filter(expert_needed == T) %>%
 
 Save data including expert_needed variable
 ```{r}
-write.csv(df4, "../../data/processed/expert_annotations/expert_demand.csv")
+write.csv(df4, "../../data/processed/expert_annotations/expert_demand.csv", row.names = FALSE)
 ```
 
