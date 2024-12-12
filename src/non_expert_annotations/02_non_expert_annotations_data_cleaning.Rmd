@@ -89,6 +89,9 @@ table(df1$annotator_ID) # check that there are more or less the same number of e
 ```
 
 ## Correct text columns
+- Some columns contain the entry "n/a" which should be replaced by NA. We first check which columns are concerned and then correct it.
+- Some columns which originally contained numeric and string values are loaded as string columns to avoid any data loss. As a result, a value like "110" is saved as "110.0". This concerns the columns ID, corrected_page and llm_scope. To correct this, we split off the ".0" from the entries.
+
 ```{r}
 # Check which columns of df1 contain entry "n/a"
 for (col in colnames(df1)) {
@@ -99,12 +102,6 @@ for (col in colnames(df1)) {
 
 df2 <- df1 %>%
   mutate(
-    # split off ".0" from ID
-    ID = str_replace_all(ID, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
-    # split off ".0" from corrected_page
-    corrected_page = str_replace_all(corrected_page, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
-    # split off ".0" from llm_scope
-    llm_scope = str_replace_all(llm_scope, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
     # replace "n/a" with NA
     value_correct = ifelse(value_correct == "n/a", NA, value_correct),
     corrected_value = ifelse(corrected_value == "n/a", NA, corrected_value),
@@ -114,6 +111,14 @@ df2 <- df1 %>%
     corrected_page = ifelse(corrected_page == "n/a", NA, corrected_page),
     reporting_type = ifelse(reporting_type == "n/a", NA, reporting_type),
     metric_name = ifelse(metric_name == "n/a", NA, metric_name),
+  ) %>%
+  mutate(
+    # split off ".0" from ID
+    ID = str_replace_all(ID, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
+    # split off ".0" from corrected_page
+    corrected_page = str_replace_all(corrected_page, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
+    # split off ".0" from llm_scope
+    llm_scope = str_replace_all(llm_scope, pattern = "\\b(\\d+)\\.0\\b", replacement = "\\1"),
   )
 
 ```
@@ -121,8 +126,7 @@ df2 <- df1 %>%
 
 ## Handle the rows with row ID "x"
 
-A non-x row is a page-year-scope combination. Correct ID because currently string "110.0", so split off ".0"
-For the x-rows, transform the ID to a similar variable by concatenating page, year and scope.
+The ID column contains entries of numeric form "112" as well as of string form "x". The latter concerns rows which were added manually by the non-experts. In order to create a unique identifier for these rows, we concatenate their ID with corrected_page, llm_year and llm_scope.
 
 ```{r}
 df3 <- df2 %>%
@@ -169,207 +173,6 @@ df5 <- df4 %>% mutate(
   metric_name = ifelse(value_correct == "No" & is.na(corrected_value), NA, metric_name))
 ```
 
-## Handle duplicate rows which differ only in reporting_type or metric_name reported by two annotators
-
-```{r}
-df_output_format <- df5 %>% 
-  select(ID, report_name, llm_scope, llm_year, llm_value, llm_unit, page_used, metric_name, reporting_type) %>% distinct()
-
-similar_rows_by_reporting_type <- df_output_format %>%
-  group_by(across(-reporting_type)) %>%
-  filter(n() > 1) %>%
-  ungroup() %>%
-  arrange(ID)
-
-similar_rows_by_metric_name <- df_output_format %>%
-  group_by(across(-metric_name)) %>%
-  filter(n() > 1) %>%
-  ungroup() %>%
-  arrange(ID)
-```
-
-Get entries annotated by annotators
-
-```{r}
-similar_rows_by_reporting_type <- left_join(similar_rows_by_reporting_type, df5, by = c("ID", "report_name", "llm_scope", "llm_year", "llm_value", "llm_unit", "page_used", "metric_name", "reporting_type"))
-
-similar_rows_by_metric_name <- left_join(similar_rows_by_metric_name, df5, by = c("ID", "report_name", "llm_scope", "llm_year", "llm_value", "llm_unit", "page_used", "metric_name", "reporting_type"))
-```
-
-Remove similar_rows_by_reporting_type and similar_rows_by_metric_name from df5 to add corrected rows later again
-
-```{r}
-df6 <- df5 %>% anti_join(similar_rows_by_reporting_type, by = c("ID", "report_name", "llm_scope", "llm_year", "llm_value", "llm_unit", "page_used", "metric_name", "reporting_type")) %>%
-  anti_join(similar_rows_by_metric_name, by = c("ID", "report_name", "llm_scope", "llm_year", "llm_value", "llm_unit", "page_used", "metric_name", "reporting_type"))
-```
-
-Manually inspect the rows of similar_rows_by_reporting_type:
-
-Annotators set different reporting_type ==\> **to be inspected together**
-
-```{r}
-similar_rows_by_reporting_type
-```
-
-Add rows in similar_rows_by_reporting_type back to main dataframe
-
-```{r}
-df7 <- df6 %>% bind_rows(similar_rows_by_reporting_type)
-```
-
-Manually inspect the rows of similar_rows_by_metric_name:
-
-```{r}
-similar_rows_by_metric_name <- similar_rows_by_metric_name %>% arrange(report_name, ID)
-```
-
-Manual inspection:
-
-1.  Group: metric_name is missing, but all other values exact duplicate of other row ==\> use fill to copy metric_name where reporting_type set
-
-```{r}
-similar_rows_by_metric_name <- similar_rows_by_metric_name %>% group_by(ID, report_name, llm_scope, llm_year, llm_value, llm_unit, page_used, reporting_type, value_correct) %>% fill(metric_name, .direction = "downup")
-```
-
-```{r}
-similar_rows_by_metric_name %>% filter(is.na(metric_name) | is.na(reporting_type))
-```
-
-Manual correction:
-
--   sps commerce inc_2020_report.pdf: For corrected_value NOT NA reporting_type should NOT be NA ==\> set to For corrected_value is NA metric_name should be NA
-
-```{r}
-similar_rows_by_metric_name <- similar_rows_by_metric_name %>% mutate(
-  metric_name = ifelse(report_name == "sps commerce inc_2020_report.pdf" & is.na(corrected_value), NA, metric_name),
-  reporting_type = ifelse(report_name == "sps commerce inc_2020_report.pdf" & !is.na(corrected_value) & is.na(reporting_type), "Table", reporting_type)
-)
-```
-
-2.  Group: differ only in metric_name
-
-```{r}
-similar_rows_by_metric_name %>% group_by(ID, report_name, llm_scope, llm_year, llm_value, llm_unit, page_used, reporting_type) %>% 
-  filter(n_distinct(metric_name) > 1) %>% 
-  ungroup()
-```
-
-Observations:
-
--   slight differences, e.g. "\n" included in one metric_name, but not the other ==\> normalisation needed
-
--   some annotators also report unit in metric_name
-
--   various nomenclature for scope 1, 2, 3
-
--   interesting for error analysis
-
-Replace changed rows in similar_rows_by_metric_name in df5
-
-```{r}
-df8 <- df7 %>% bind_rows(similar_rows_by_metric_name)
-```
-
-
-## Handle differences in corrected value and corrected page between annotators
-
-While creating the gold standard data set, we noticed a couple of mistakes in the annotations which will not be corrected by expert annotation. This concerns rows where both annotators agree on the value correct column, but they disagree on the corrected value or the corrected page. In the following, we want to correct these rows in the data set.
-
-We first identify the rows which are concerned by this issue.
-
-```{r}
-source("../pivot.R")
-```
-
-```{r}
-# Variable list can be extended any time
-pivot_vars <- c("value_correct", "corrected_value", "unit_correct", "corrected_unit", "page_correct", "corrected_page")
-pivot_combined <- pivot_w_split(df8, pivot_vars)
-```
-
-Create agreement columns for all variables
-```{r}
-vars_for_agreement <- c("value_correct", "corrected_value", "unit_correct", "corrected_unit", "page_correct", "corrected_page")
-
-for (var in vars_for_agreement) {
-    pivot_combined <- agreement_func(pivot_combined, var)
-}
-```
-
-Further we want to normalize the unit:
-
-Load normalization dictionary
-```{r}
-normalization_dict <- read.csv("../../data/processed/unit_normalization.csv")
-```
-
-Merge normalized units to dataset
-```{r}
-pivot_combined <- pivot_combined %>% 
-  mutate(normalized_corrected_unit_1 = ifelse(!is.na(corrected_unit_1), normalization_dict$normalized_unit[match(corrected_unit_1, normalization_dict$unit)], corrected_unit_1),
-         normalized_corrected_unit_2 = ifelse(!is.na(corrected_unit_2), normalization_dict$normalized_unit[match(corrected_unit_2, normalization_dict$unit)], corrected_unit_2))
-
-pivot_combined <- agreement_func(pivot_combined, "normalized_corrected_unit")
-```
-
-Identify problematic rows where annotators agree on the value correct column, but disagree on the corrected value or the corrected page or the normalized corrected unit
-```{r}
-pivot_combined <- pivot_combined %>% mutate(agreement_value_and_unit = agreement_value_correct & agreement_unit_correct)
-problematic_rows <- pivot_combined %>% group_by(report_name) %>% filter(all(agreement_value_and_unit == T) & (!agreement_corrected_value | !agreement_corrected_page | !agreement_normalized_corrected_unit))
-```
-
-Manual inspection of problematic rows
-- disagreement on corrected value: 
-    - inchcape plc_2022_report.pdf (annotator 1 found values, annotator 2 did not) ==> No value for 2019 in report 
-    ==> annotator 2 is right
-    ==> set values of annotator 1 to values of annotator 2
-    - apollo commercial real estate fina_2019_report.pdf (annotator 1 found values, annotator 2 did not) 
-    ==> annotator 1 is right
-    ==> set values of annotator 2 to values of annotator 1
-    - americold realty inc_2022_report.pdf (probably a typo: 72314 vs. 72134)	
-    ==> annotator 2 is right
-    ==> set value of annotator 1 to value of annotator 2
-- disagreement on corrected page:
-    - freni brembo_2018_report.pdf (Annotator 2: 127 because Page correct: No, Annotator 1: NA because Page correct: Yes) 
-    ==> Annotator 1 is right (127 is page number on page pdf)
-    ==> Set corrected page of annotator 2 to corrected page of annotator 1
-    - evolution mining ltd_2020_report.pdf (page 42 vs. 44) 
-    ==> page 44 is correct 
-    ==> annotator 2 is right
-    ==> set corrected page of annotator 1 to corrected page of annotator 2
-
-Manual correction of problematic rows
-```{r}
-problematic_rows <- problematic_rows %>% mutate(
-  corrected_value_1 = ifelse(report_name == "inchcape plc_2022_report.pdf", corrected_value_2, corrected_value_1),
-  corrected_unit_1 = ifelse(report_name == "inchcape plc_2022_report.pdf", corrected_unit_2, corrected_unit_1),
-  page_correct_1 = ifelse(report_name == "inchcape plc_2022_report.pdf", page_correct_2, page_correct_1),
-  corrected_value_2 = ifelse(report_name == "apollo commercial real estate fina_2019_report.pdf", corrected_value_1, corrected_value_2),
-  corrected_unit_2 = ifelse(report_name == "apollo commercial real estate fina_2019_report.pdf", corrected_unit_1, corrected_unit_2),
-  corrected_page_2 = ifelse(report_name == "apollo commercial real estate fina_2019_report.pdf", corrected_page_1, corrected_page_2),
-  corrected_value_1 = ifelse(report_name == "americold realty inc_2022_report.pdf", corrected_value_2, corrected_value_1),
-  page_correct_2 = ifelse(report_name == "freni brembo_2018_report.pdf", page_correct_1, page_correct_2),
-  corrected_page_2 = ifelse(report_name == "freni brembo_2018_report.pdf", corrected_page_1, corrected_page_2),
-  corrected_page_1 = ifelse(report_name == "evolution mining ltd_2020_report.pdf", corrected_page_2, corrected_page_1)
-)
-```
-
-Reverse the pivot to replace the corrected rows in the main dataframe
-```{r}
-pivot_corrected <- problematic_rows %>% select(-starts_with("agreement"), -starts_with("normalized")) %>%
-  group_by(report_name, ID, page_used, llm_year, llm_scope, llm_value, llm_unit) %>%
-  pivot_longer(cols = -c(report_name, ID, page_used, llm_year, llm_scope, llm_value, llm_unit), names_to = c(".value", "set"), names_pattern = "(.+)_(.+)") %>% select(-set)
-```
-
-Join corrected rows back to main dataframe
-```{r}
-extra_columns_corrections <- df8 %>% right_join(pivot_corrected, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID")) %>% select(-ends_with(".x"), -ends_with(".y"))
-
-pivot_corrected <- pivot_corrected %>% left_join(extra_columns_corrections, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID"))
-
-df9 <- df8 %>% anti_join(pivot_corrected, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID")) %>% bind_rows(pivot_corrected)
-```
-
 ## Handle annotation mistakes
 If value_correct == "Yes", corrected_value should be NA
 If corrected_value is not NA, value_correct should be "No"
@@ -379,51 +182,51 @@ For value:
 - Is value_correct == NA & corrected_value not NA?
 
 ```{r}
-df9 %>% filter(is.na(value_correct) & !is.na(corrected_value))
+df5%>% filter(is.na(value_correct) & !is.na(corrected_value))
 
 ```
 Set value_correct to "No"
 ```{r}
-df10 <- df9 %>% mutate(value_correct = ifelse(is.na(value_correct) & !is.na(corrected_value), "No", value_correct))
+df6 <- df5 %>% mutate(value_correct = ifelse(is.na(value_correct) & !is.na(corrected_value), "No", value_correct))
 ```
 
 - Is value correct == "Yes" & corrected_value not NA?
 ```{r}
-df10 %>% filter(value_correct == "Yes" & !is.na(corrected_value))
+df6 %>% filter(value_correct == "Yes" & !is.na(corrected_value))
 ```
 
 For unit:
 - Is value_correct == NA & corrected_value not NA?
 ```{r}
-df10 %>% filter(is.na(unit_correct) & !is.na(corrected_unit))
+df6 %>% filter(is.na(unit_correct) & !is.na(corrected_unit))
 ```
 ```{r}
-df11 <- df10 %>% mutate(unit_correct = ifelse(is.na(unit_correct) & !is.na(corrected_unit), "No", unit_correct))
+df7 <- df6 %>% mutate(unit_correct = ifelse(is.na(unit_correct) & !is.na(corrected_unit), "No", unit_correct))
 ```
 
 - Is unit_correct == "Yes" & corrected_unit not NA?
 ```{r}
-df11 %>% filter(unit_correct == "Yes" & !is.na(corrected_unit))
+df7 %>% filter(unit_correct == "Yes" & !is.na(corrected_unit))
 ```
 
 For page:
 - Is page_correct NA & corrected_page not NA?
 ```{r}
-df11 %>% filter(is.na(page_correct) & !is.na(corrected_page))
+df7 %>% filter(is.na(page_correct) & !is.na(corrected_page))
 ```
 
 - Is page_correct == "Yes" & corrected_page not NA?
 ```{r}
-df11 %>% filter(page_correct == "Yes" & !is.na(corrected_page))
+df7 %>% filter(page_correct == "Yes" & !is.na(corrected_page))
 ```
 Correct this manually
 ```{r}
-df12 <- df11 %>% 
+df8 <- df7 %>% 
   mutate(page_correct = ifelse(page_correct == "Yes" & !is.na(corrected_page), "No", page_correct))
 ```
 
 # Save cleaned data
 ```{r}
-write.csv(df12,"../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv", row.names = FALSE)
+write.csv(df8,"../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv", row.names = FALSE)
 ```
 
