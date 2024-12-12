@@ -1,0 +1,206 @@
+---
+title: "06_expert_annotations_template_filling"
+author: "Anna Steinberg and Laia Domenech Burin"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+## Goal of the script: Set up expert annotation template and transform reports requiring expert adjudication to template
+
+### Read input data and packages
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+```
+
+## Functions to fill template
+```{r}
+# Template header 
+fill_template_header <- function(template_header, 
+                                 exp_demand_data){
+  
+  colnames(template_header) <- 'File data'
+  
+  # When a row was added only by one annotator, document_comment_annotator_x contains cells with NA
+  # We need to set the value of document_comment_x to the non-NA value if available
+  
+  doc_comment_1 <- if (length(exp_demand_data %>% distinct(document_comment_1) %>% pull(document_comment_1)) > 1) {
+    exp_demand_data %>% distinct(document_comment_1) %>% filter(!is.na(document_comment_1)) %>% pull(document_comment_1)
+  } else {
+    exp_demand_data %>% distinct(document_comment_1) %>% pull(document_comment_1)
+  }
+  
+  doc_comment_2 <- if (length(exp_demand_data %>% distinct(document_comment_2) %>% pull(document_comment_2)) > 1) {
+    exp_demand_data %>% distinct(document_comment_2) %>% filter(!is.na(document_comment_2)) %>% pull(document_comment_2)
+  } else {
+    exp_demand_data %>% distinct(document_comment_2) %>% pull(document_comment_2)
+  }
+  
+  Extra <- c(
+    unique(exp_demand_data$report_name),
+    doc_comment_1,
+    doc_comment_2,
+    unique(exp_demand_data$document_expert_requested_by_at_least_one_annotator)
+  )
+  
+  # Extend or trim 'Extra' to match the length of 'template_header'
+  Extra_padded <- if (length(Extra) < nrow(template_header)) {
+    c(Extra, rep(NA, nrow(template_header) - length(Extra)))
+  } 
+  
+  else {
+    Extra[1:nrow(template_header)]
+  }
+  
+  # Create the result tibble with the header and the padded 'Extra' column
+  result <- tibble(
+    ' ' = template_header[[1]],
+    '  ' = Extra_padded
+  )
+  return(result)
+}
+```
+
+```{r}
+fill_template_table <- function(exp_demand_data, 
+                                template_table){
+  
+    exp_demand_data_columns <- exp_demand_data %>% select(ID, 
+                                                      page_used,
+                                                      starts_with('llm'), 
+                                                      contains('_1'),
+                                                      contains('_2'),
+                                                      row_expert_requested_by_at_least_one_annotator_or_disagreement)
+    
+    template_columns <- template_table %>%
+      select('LLM Year',
+             'LLM Scope',
+             'Value: Who is right?':'Value Reasoning (select if necessary, if multiple apply choose first)',
+             'Unit: Who is right?':'Unit reasoning  (select if necessary, if multiple apply choose first)',
+             'Page corrected (fill in if necessary)',
+             'Expert comment')
+  
+  fill_template_table <- template_columns %>% full_join(exp_demand_data_columns, 
+                                                         by = c('LLM Year' = 'llm_year',
+                                                                'LLM Scope' = 'llm_scope'))
+  
+  fill_template_table <- fill_template_table %>% filter(!is.na(ID))
+  return(fill_template_table)
+}
+```
+
+```{r}
+rename_and_organize_columns <- function(table){
+    table <- table %>%
+      select(
+        'ID',
+        'Page used' = 'page_used',
+        'LLM Year',
+        'LLM Scope',
+        'LLM Value' = 'llm_value',
+        'LLM Unit' = 'llm_unit',
+        row_expert_requested_by_at_least_one_annotator_or_disagreement,
+        'Value correct (Yes/No) Ann 1' = 'value_correct_1',
+        'Value corrected Ann 1' = 'corrected_value_1',
+        'Corrected page Ann 1' = 'corrected_page_1',
+        'Value correct (Yes/No) Ann 2' = 'value_correct_2',
+        'Value corrected Ann 2' = 'corrected_value_2',
+        'Corrected page Ann 2' = 'corrected_page_2',
+        'Value: Who is right?',
+        'Value corrected (fill in if necessary)',
+        'Value Reasoning (select if necessary, if multiple apply choose first)',
+        'Unit correct (Yes/No) Ann 1' = 'unit_correct_1',
+        'Unit corrected Ann 1' = 'corrected_unit_1',
+        'Unit correct (Yes/No) Ann 2' = 'unit_correct_2', 
+        'Unit corrected Ann 2' = 'corrected_unit_2',
+        'Unit: Who is right?',
+        'Unit corrected (fill in if necessary)',
+        'Unit reasoning  (select if necessary, if multiple apply choose first)',
+        'Comment Ann1' = 'comment_1',
+        'Comment Ann2'= 'comment_2',
+        'Page corrected (fill in if necessary)',
+        'Expert comment')
+  return(table)
+  
+}
+```
+
+```{r}
+write_template_per_doc <- function(template_path, 
+                                    filled_header,
+                                    filled_table,
+                                    doc_name, 
+                                    folder_paths){
+  
+    wb <- loadWorkbook(template_path)
+
+    writeData(wb, sheet = "Annotation", 
+                  x = filled_header, 
+                  startCol = 1, startRow = 1, 
+                  colNames = TRUE, rowNames = FALSE)
+        
+    writeData(wb, sheet = "Annotation",
+              x = filled_table,
+              startCol = 1, startRow = 12,
+              colNames = TRUE, rowNames = FALSE)
+    
+    for (i in 1:length(folder_paths)) {
+      if (!dir.exists(folder_paths[i])) {
+        dir.create(folder_paths[i], recursive = TRUE)
+      }
+      # Save the workbook with updates
+      saveWorkbook(wb, file = paste0(folder_paths[i], "/", sub("\\.pdf$", "", doc_name),".xlsx"), overwrite = TRUE)
+    }
+}
+```
+
+```{r}
+# Combined function to fill and write a template per document
+fill_and_write_template <- function(document_name, exp_demand_data, template_path, folder_paths) {
+  
+  # Load the data of the document
+  document_data <- exp_demand_data %>% filter(report_name == document_name)
+  
+  # Load the templates 1 and 2 and save header and table separately
+  template_header <- readxl::read_excel(template_path, sheet = 1, col_names = FALSE, n_max = 4)
+  template_table <- readxl::read_excel(template_path, sheet = 1, skip = 11)
+  
+  # Fill template headers
+  filled_header <- fill_template_header(template_header = template_header,
+                                        exp_demand_data = document_data)
+
+    # Fill template tables
+  filled_template_table <- fill_template_table(exp_demand_data = document_data,
+                                               template_table = template_table)
+  # Rename and organize
+  filled_template_table <- rename_and_organize_columns(filled_template_table)
+  
+  # Save
+  write_template_per_doc(template_path = template_path,
+                          filled_header = filled_header,
+                          filled_table = filled_template_table,
+                          doc_name = document_name,
+                          folder_paths = folder_paths)
+}
+```
+
+### Run for all documents
+```{r}
+# Set path to template
+template_path <- '../../data/templates/expert_annotation_template.xlsx' 
+
+exp_demand_data <- read.csv("../../data/processed/expert_annotations/data_for_expert_annotation_templates.csv")
+
+# Filter files that require expert revision 
+exp_demand_data <- exp_demand_data %>% group_by(report_name) %>% filter(document_expert_requested_by_at_least_one_annotator == "Yes" | any(row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes")) %>% ungroup()
+
+# Location to save the filled templates
+# For the expert annotation we create pairs from our 4 experts and randomly assign reports to them ensuring double coding of each report
+# To keep the privacy of our experts, we do not disclose the pairs here, but rather provide fictitious folder paths to illustrate the process
+folder_paths <- c("../../data/templates/expert_pair_1", "../../data/templates/expert_pair_2")
+
+# Apply to all (sample) documents
+documents <- unique(exp_demand_data$report_name)
+map(documents, fill_and_write_template, exp_demand_data = exp_demand_data, template_path = template_path, folder_paths = folder_paths)
+```
