@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 output: distill::distill_article
 ---
 
-## Goal of the script: Determine expert disagreement by identifying reports where experts disagree on the true value
+## Goal of the script: Determine expert disagreement by identifying reports where experts disagree on the true value annotation
 
 ### Read packages
 
@@ -193,13 +193,16 @@ Reports for discussion
 - disagreement on value and unit 
 OR
 - at least one group flagged unclear record
+
 ```{r}
 exp %>% group_by(`Report Name`) %>% filter(any(agreement_value_unit == FALSE) | any(at_least_one_group_flagged_unclear == TRUE)) %>% distinct(`Report Name`) %>% arrange(`Report Name`)
 ```
+
 Reports for which experts agree on value and unit, but disagree on page
 ```{r}
 exp %>% group_by(`Report Name`) %>% filter(any(agreement_value_unit == TRUE) & any(agreement_page == FALSE)) %>% distinct(`Report Name`)
 ```
+
 *Definition of expert disagreement*
 - disagreement on value or unit or page
 OR
@@ -232,8 +235,8 @@ Save dataset for later use
 write.csv(exp, "../../data/processed/expert_discussion/expert_disagreement.csv", row.names = FALSE)
 ```
 
+Rearrange dataframe
 ```{r}
-# rearrange dataframe
 exp_discussion <- exp %>%
   select(`Report Name`, `Document comment Annotator 1`, `Document comment Annotator 2`, `Expert document comment.g1`, `Expert document comment.g2`, `Document-level expert adjudication requested by at least 1 annotator`, 
          ID, `Page used`, `LLM Year`, `LLM Scope`, `LLM Value`, `LLM Unit`, 

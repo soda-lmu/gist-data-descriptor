@@ -1,13 +1,13 @@
 ---
 title: "08_expert_discussion_template_filling"
-author: "Laia Domenceh Burin"
+author: "Laia Domenech Burin"
 date: "`r Sys.Date()`"
 output: distill::distill_article
 ---
 
-## Goal of the script: Set up expert discussion template and transform reports that were analyzed by experts to template
+## Goal of the script: Set up expert discussion template and transfer records from reports that were analyzed by experts to template
 
-### Read input data and packages
+### Load packages
 
 ```{r}
 library(tidyverse)
