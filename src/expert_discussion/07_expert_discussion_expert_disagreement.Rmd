@@ -64,12 +64,15 @@ load_and_transform <- function(path){
   # Load data
   exp_g1_header <- read_excel(path, sheet = 1, n_max = 10)
   exp_g1_body <- read_excel(path, sheet = 1, skip = 10, col_types = column_types)
-
+  
   # Delete empty rows in body
   exp_g1_body <- exp_g1_body %>% filter(!is.na(`LLM Year`))
   
   # Pivot header and combine with body
   exp_g1 <- exp_g1_header %>% rename( "Variable" = 1, "Entry" = 2) %>% pivot_wider(names_from = Variable, values_from = Entry) %>% cbind(exp_g1_body)
+  
+  # Normalize column names
+  colnames(exp_g1) <- str_replace_all(colnames(exp_g1), pattern = "\r\n|\n", replacement = " ")
   
   # Correct time format
   exp_g1 <- exp_g1 %>% 
