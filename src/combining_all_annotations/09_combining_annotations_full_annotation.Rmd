@@ -1,0 +1,297 @@
+---
+title: "09_combining_annotations_full_annotation"
+author: "Anna Steinberg"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+# Goal of the script: Create full annotation dataset 
+
+Combine non-expert, expert annotations and expert discussion into one dataset and compute final values, units and pages. For each type (value, unit, page) the procedure is rather complex, so for each type the final entry is first computed using complex if-conditions, then every condition is checked manually and issues are resolved manually. 
+The resulting full annotations dataframe is used to create gold standard and annotations dataset. The combine the datasets back together a merge id is created. 
+
+# Load libraries
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+source("../pivot.R")
+```
+
+# Merge all datasets together
+
+## Load non_expert annotations
+```{r}
+load_non_expert_annotations <- function(cleaned_data, pivot_vars) {
+  # Pivot the data with the requested variables
+  pivot <- pivot_w_split(cleaned_data, pivot_vars)
+
+  # Create agreement for value_correct and unit_correct to identify rows where non-expert annotators disagreed
+  agreement_vars <- c("value_correct", "unit_correct")
+  for (var in agreement_vars) {
+    pivot <- agreement_func(pivot, var)
+  }
+  pivot <- pivot %>% mutate(agreement_value_and_unit = ifelse(agreement_value_correct == T & agreement_unit_correct == T,T,F))
+
+  # Recreate variables used for identifying reports for expert review
+  pivot <- pivot %>%
+    mutate(document_expert_requested_by_at_least_one_annotator = ifelse(rowSums(select(., contains("document_expert_needed")) == "Yes", na.rm = TRUE) > 0, "Yes", "No"))
+  
+  pivot <- pivot %>%
+    mutate(row_expert_requested_by_at_least_one_annotator_or_disagreement = ifelse(rowSums(select(., contains("record_expert_needed")) == "Yes", na.rm = TRUE) > 0 | agreement_value_and_unit == F, "Yes", "No"))
+  
+  return(pivot)
+}
+```
+
+```{r}
+cleaned_data <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
+
+# Choose all variables from non-expert annotations we want to include in final annotations
+pivot_vars <- c("value_correct", "corrected_value", "unit_correct", "corrected_unit", "page_correct", "corrected_page", "comment", "record_expert_needed", "document_comment", "document_expert_needed", "metric_name", "reporting_type")
+
+non_expert_annotations <- load_non_expert_annotations(cleaned_data, pivot_vars)
+```
+
+Delete agreement variables because they will be recomputed later
+```{r}
+non_expert_annotations <- non_expert_annotations %>% 
+  select(-starts_with("agreement"))
+```
+
+Compute value chosen by non-experts (needed for mismatch computation below)
+```{r}
+non_expert_annotations <- non_expert_annotations %>% 
+  mutate(
+    value_1 = ifelse(value_correct_1 == "Yes", llm_value, corrected_value_1),
+    value_2 = ifelse(value_correct_2 == "Yes", llm_value, corrected_value_2),
+  )
+```
+
+## Add expert annotations to this dataframe
+```{r}
+expert_annotations <- read.csv("../../data/processed/expert_discussion/expert_disagreement.csv")
+```
+
+Remove agreement variables and true variables
+```{r}
+expert_annotations <- expert_annotations %>% 
+  # will be recomputed
+  select(-starts_with("agreement"), -starts_with("true")) %>%
+  
+  # error in previous dataset, supposed to be character all along
+  mutate(Corrected.page.Ann.2 = as.character(Corrected.page.Ann.2)) %>% 
+  mutate(Page.corrected..fill.in.if.necessary..g1 = as.character(Page.corrected..fill.in.if.necessary..g1)) #%>% 
+  
+  # only select columns for merging and columns which are new in expert_annotations compared to non_expert annotations
+  #select(Report.Name, ID, Page.used, LLM.Year, LLM.Scope, LLM.Value, LLM.Unit,  ends_with("g1"), ends_with("g2"), row_disagreement_value_unit_page_or_unclear)
+```
+
+Create identifier for reports passed to expert annotations
+```{r}
+reports_in_expert_annotations <- expert_annotations %>% select(Report.Name) %>% distinct()
+```
+
+Join non-expert and expert annotations
+```{r}
+annotations <- left_join(non_expert_annotations, expert_annotations, by = c(
+  "report_name" = "Report.Name",
+  "ID",
+  "page_used" = "Page.used",
+  "llm_year" = "LLM.Year",
+  "llm_scope" = "LLM.Scope",
+  "llm_value" = "LLM.Value",
+  "llm_unit" = "LLM.Unit"
+  ))
+```
+
+### Solve mismatch
+For some reason, in the expert annotations the columns of the non-experts are sometimes switched compared to the non-expert annotations. We need to resolve this by 
+1) identifying the reports which are concerned
+2) swapping the columns in those reports
+
+1) Identify reports with mismatch
+```{r}
+mismatch <- annotations %>% filter(report_name %in% reports_in_expert_annotations$Report.Name) %>% 
+  filter(
+    (is.na(value_1) & !is.na(Value.Ann.1)) |
+       (!is.na(value_1) & is.na(Value.Ann.1)) |
+      value_1 != Value.Ann.1 ) %>%
+  select(report_name, ID, value_1, value_2, Value.Ann.1, Value.Ann.2)
+
+mismatch %>% distinct(report_name)
+```
+
+2) Swapping the columns in those reports
+Concerned columns:
+- value_correct_1/2
+- corrected_value_1/2
+- unit_correct_1/2
+- corrected_unit_1/2
+- page_correct_1/2
+- corrected_page_1/2
+- comment_1/2
+- document_comment_1/2
+- record_expert_needed_1/2
+- document_expert_need_1/2
+- metric_name_1/2
+- reporting_type_1/2
+
+We want to change the columns from the non-expert annotations with the help of the columns from the expert annotations.
+We use value_1 and value_2 (non-expert annotations) and Value.Ann.1 and Value.Ann.2 (expert annotations) to do the swap.
+For correct swapping, we need to create temporary variables which we delete after the swap
+
+```{r}
+swap_values <- function(data, mismatch, non_expert_val, non_expert_check_val, expert_check_val) {
+  non_expert_val1 <- sym(paste0(non_expert_val, "_1"))
+  non_expert_val_temp <- sym(paste0(non_expert_val, "_1_temp"))  # Create symbol for temporary variable
+  non_expert_val2 <- sym(paste0(non_expert_val, "_2"))  # Convert variable name to symbol
+  non_expert_check_val1 <- sym(paste0(non_expert_check_val, "_1"))  # Convert variable name to symbol
+  non_expert_check_val2 <- sym(paste0(non_expert_check_val, "_2"))  # Convert variable name to symbol
+  expert_check_val1 <- sym(paste0(expert_check_val, ".1")) # Convert variable name to symbol)
+  expert_check_val2 <- sym(paste0(expert_check_val, ".2")) # Convert variable name to symbol)
+  
+  data <- data %>%
+    mutate(!!non_expert_val_temp := case_when(
+      report_name %in% mismatch$report_name & (is.na(!!non_expert_check_val2) & is.na(!!expert_check_val1)) ~ !!non_expert_val2,
+      report_name %in% mismatch$report_name & !!non_expert_check_val2 == !!expert_check_val1 ~ !!non_expert_val2, 
+      TRUE ~ !!non_expert_val1
+    )) %>%
+    mutate(!!non_expert_val2 := case_when(
+      report_name %in% mismatch$report_name & (is.na(!!non_expert_check_val1) & is.na(!!expert_check_val2)) ~ !!non_expert_val1,
+      report_name %in% mismatch$report_name & !!non_expert_check_val1 == !!expert_check_val2 ~ !!non_expert_val1,
+      TRUE ~ !!non_expert_val2
+    ),
+    !!non_expert_val1 := !!non_expert_val_temp
+    ) %>%
+    select(-!!non_expert_val_temp)  # Remove the temporary column
+    
+  return(data)
+}
+
+# The function does the following
+# Example for swapping value_correct_1/2
+#data <- data %>% mutate(
+# value_correct_1_temp = case_when(
+#     report_name %in% mismatch$report_name & (is.na(value_2) & is.na(Value.Ann.1)) ~ value_correct_2,
+#     report_name %in% mismatch$report_name & value_2 == Value.Ann.1 ~ value_correct_2, 
+#     .default = value_correct_1
+#   ),
+#    value_correct_2 = case_when(
+#     report_name %in% mismatch$report_name & (is.na(value_1) & is.na(Value.Ann.2)) ~ value_correct_1,
+#     report_name %in% mismatch$report_name & value_1 == Value.Ann.2 ~ value_correct_1,
+#      .default = value_correct_2
+#    ),
+#    value_correct_1 = value_correct_1_temp
+#)
+```
+
+```{r}
+concerned_variables <- c("value_correct", "corrected_value", "unit_correct", "corrected_unit", "page_correct", "corrected_page", "comment", "record_expert_needed", "document_comment", "document_expert_needed", "metric_name", "reporting_type")
+
+for (var in concerned_variables) {
+  test <- swap_values(annotations, mismatch, var, "value", "Value.Ann")
+}
+```
+
+Check if the swap was successful
+```{r}
+#annotations %>% filter(report_name %in% mismatch$report_name) %>% select(report_name, ID, value_1, value_2, Value.Ann.1, Value.Ann.2)
+```
+
+More checks
+```{r}
+test %>% filter(value_correct_1 != Value.correct..Yes.No..Ann.1) %>% select(report_name, value_correct_1, corrected_value_1, Value.correct..Yes.No..Ann.2, Value.corrected.Ann.2, Value.correct..Yes.No..Ann.1, Value.corrected.Ann.1, value_correct_2, corrected_value_2)
+```
+```{r}
+test %>% filter(value_correct_2 != Value.correct..Yes.No..Ann.2)
+```
+
+### Check expert annotations for discrepancies
+```{r}
+annotations %>% filter(is.na(Value..Who.is.right..g1) & !is.na(Value.corrected..fill.in.if.necessary..g1))
+```
+```{r}
+annotations %>% filter(is.na(Value..Who.is.right..g2) & !is.na(Value.corrected..fill.in.if.necessary..g2))
+```
+```{r}
+annotations %>% filter(is.na(Unit..Who.is.right..g1) & !is.na(Unit.corrected..fill.in.if.necessary..g1))
+```
+Correct to "Unit..Who is right..g1" == "Neither"
+```{r}
+annotations <- annotations %>% mutate(
+  `Unit..Who.is.right..g1` = ifelse(is.na(`Unit..Who.is.right..g1`) & !is.na(`Unit.corrected..fill.in.if.necessary..g1`), "Neither", `Unit..Who.is.right..g1`)
+)
+```
+
+
+```{r}
+annotations %>% filter(is.na(Unit..Who.is.right..g2) & !is.na(Unit.corrected..fill.in.if.necessary..g2))
+```
+
+## Add expert discussion
+```{r}
+folder_path <- "../../data/raw/expert_discussion/"
+
+files <- list.files(folder_path, full.names = TRUE)
+
+expert_discussion <- data.frame()
+for (file in files) {
+  
+  # Load data
+  expert_header <- openxlsx::read.xlsx(file, sheet = 1, rows = 1:6, cols = 1:2, colNames = FALSE)
+  expert_body <- openxlsx::read.xlsx(file, sheet = 1, startRow = 7)
+  
+  # Delete empty rows in body
+  expert_body <- expert_body %>% filter(!is.na(LLM.Year))
+  
+  # Pivot header and combine with body
+  expert <- expert_header %>% rename( "Variable" = 1, "Entry" = 2) %>% pivot_wider(names_from = Variable, values_from = Entry) %>% cbind(expert_body)
+
+  # Add to dataframe
+  expert_discussion <- rbind(expert_discussion, expert)
+  
+  # Normalize column names
+  colnames(expert_discussion) <- str_replace_all(colnames(expert_discussion), pattern = "\r\n|\n", replacement = " ")
+  
+}
+
+```
+Correct true columns
+```{r}
+expert_discussion <- expert_discussion %>%
+  # replace string "NA" but actual NA value
+  mutate(True.unit = ifelse(True.unit == "NA", NA, True.unit),
+         True.page = ifelse(True.page == "NA", NA, True.page)) %>%
+  
+  # transform corrected page to character (previous mistake when reading in data)
+  mutate(Corrected.page.Ann.2 = as.character(Corrected.page.Ann.2)) %>% 
+  mutate(`Page.corrected.(fill.in.if.necessary).G1` = as.character(`Page.corrected.(fill.in.if.necessary).G1`)) %>%
+  
+  # undo transformation for template filling from boolean strings to boolean values
+  mutate(row_disagreement_value_unit_page_or_unclear = if_else(row_disagreement_value_unit_page_or_unclear ==  "yes", TRUE, FALSE)) %>% 
+  
+  # select only columns for merging and new columns compared to expert_annotations
+  select(`Report Name`, ID, Page.used, LLM.Year, LLM.Scope, LLM.Value, LLM.Unit, True.value, True.unit, True.page, Unresolvable, Comment)
+```
+
+Merge to annotations
+```{r}
+annotations <- left_join(annotations, expert_discussion, by = c(
+  "report_name" = "Report Name",
+  "ID",
+  "page_used" = "Page.used",
+  "llm_year" = "LLM.Year",
+  "llm_scope" = "LLM.Scope",
+  "llm_value" = "LLM.Value",
+  "llm_unit" = "LLM.Unit"
+))
+```
+
+# Save combined dataset
+```{r}
+write.csv(annotations, "../../data/processed/combined_annotations/annotations.csv", row.names = FALSE)
+```
+
