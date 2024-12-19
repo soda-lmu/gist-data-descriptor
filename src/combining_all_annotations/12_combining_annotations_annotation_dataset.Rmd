@@ -1,0 +1,157 @@
+---
+title: "12_combining_annotations_annotation_dataset"
+author: "Anna Steinberg"
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+# Goal of the script: Create annotation dataset for publication
+
+# Load libraries
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+source("../pivot.R")
+```
+
+# Load dataset
+```{r}
+annotations <- read.csv("../../data/processed/combined_annotations/annotations_incl_gold_standard.csv")
+cleaned_data <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
+```
+
+# Add the following columns:
+- value_reasoning
+- unit_reasoning
+
+```{r}
+pivot_vars <- c("value_reasoning", "unit_reasoning")
+missing_columns <- pivot_w_split(cleaned_data, pivot_vars)
+annotations <- left_join(annotations, missing_columns, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID_1", "annotator_ID_2"))
+```
+
+- pages_searched
+```{r}
+pages_searched <- cleaned_data %>% select(report_name, pages_searched) %>% distinct()
+annotations <- left_join(annotations, pages_searched, by = c("report_name"))
+```
+
+# Change ID column
+```{r}
+annotations <- annotations %>% 
+  mutate(non_exp_manually_added_record = ifelse(grepl("x", ID), TRUE, FALSE)) # manually added rows start with "x"
+```
+
+
+# Rename columns
+```{r}
+annotations <- annotations %>% 
+  rename(
+    llm_page = page_used,
+    non_exp_1_id = annotator_ID_1,
+    non_exp_2_id = annotator_ID_2,
+    non_exp_1_is_value_correct = value_correct_1,
+    non_exp_2_is_value_correct = value_correct_2,
+    non_exp_1_corrected_value = corrected_value_1,
+    non_exp_2_corrected_value = corrected_value_2,
+    non_exp_1_value_reasoning = value_reasoning_1,
+    non_exp_2_value_reasoning = value_reasoning_2,
+    non_exp_1_value = Value.Ann.1,
+    non_exp_2_value = Value.Ann.2,
+    non_exp_1_is_unit_correct = unit_correct_1,
+    non_exp_2_is_unit_correct = unit_correct_2,
+    non_exp_1_corrected_unit = corrected_unit_1,
+    non_exp_2_corrected_unit = corrected_unit_2,
+    non_exp_1_unit_reasoning = unit_reasoning_1,
+    non_exp_2_unit_reasoning = unit_reasoning_2,
+    non_exp_1_unit = Unit.Ann.1,
+    non_exp_2_unit = Unit.Ann.2,
+    non_exp_1_is_page_correct = page_correct_1,
+    non_exp_2_is_page_correct = page_correct_2,
+    non_exp_1_corrected_page = corrected_page_1,
+    non_exp_2_corrected_page = corrected_page_2,
+    non_exp_1_page = Page.Ann.1,
+    non_exp_2_page = Page.Ann.2,
+    non_exp_1_expert_requested_for_rec = record_expert_needed_1,
+    non_exp_2_expert_requested_for_rec = record_expert_needed_2,
+    non_exp_1_expert_requested_for_doc = document_expert_needed_1,
+    non_exp_2_expert_requested_for_doc = document_expert_needed_2,
+    non_exp_1_metric_name = metric_name_1,
+    non_exp_2_metric_name = metric_name_2,
+    non_exp_1_display_type = reporting_type_1,
+    non_exp_2_display_type = reporting_type_2,
+    non_exp_filter_doc = document_expert_requested_by_at_least_one_annotator,
+    non_exp_filter_rec = row_expert_requested_by_at_least_one_annotator_or_disagreement,
+    exp_group_1_exp_1_id = Expert.ID.1.g1,
+    exp_group_1_exp_2_id = Expert.ID.2.g1,
+    exp_group_2_exp_1_id = Expert.ID.1.g2,
+    exp_group_2_exp_2_id = Expert.ID.2.g2,
+    exp_group_1_value_who_is_right = Value..Who.is.right..g1,
+    exp_group_1_corrected_value = Value.corrected..fill.in.if.necessary..g1,
+    exp_group_1_value_reasoning = Value.Reasoning..select.if.necessary..if.multiple.apply.choose.first..g1,
+    exp_group_1_value = Value.G1,
+    exp_group_2_value_who_is_right = Value..Who.is.right..g2,
+    exp_group_2_corrected_value = Value.corrected..fill.in.if.necessary..g2,
+    exp_group_2_value_reasoning = Value.Reasoning..select.if.necessary..if.multiple.apply.choose.first..g2,
+    exp_group_2_value = Value.G2,
+    exp_group_1_unit_who_is_right = Unit..Who.is.right..g1,
+    exp_group_1_corrected_unit = Unit.corrected..fill.in.if.necessary..g1,
+    exp_group_1_unit_reasoning = Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g1,
+    exp_group_1_unit = Unit.G1,
+    exp_group_2_unit_who_is_right = Unit..Who.is.right..g2,
+    exp_group_2_corrected_unit = Unit.corrected..fill.in.if.necessary..g2,
+    exp_group_2_unit_reasoning = Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g2,
+    exp_group_2_unit = Unit.G2,
+    exp_group_1_corrected_page = Page.corrected..fill.in.if.necessary..g1,
+    exp_group_1_page = Page.G1,
+    exp_group_2_corrected_page = Page.corrected..fill.in.if.necessary..g2,
+    exp_group_2_page = Page.G2,
+    exp_group_filter_rec = row_disagreement_value_unit_page_or_unclear,
+    exp_disc_value = True.value,
+    exp_disc_unit = True.unit,
+    exp_disc_page = True.page,
+    merge_id = merge_ID
+  )
+```
+
+# Rearrange columns
+```{r}
+annotations <- annotations %>%
+  select(-contains("agreement")) %>%
+  select(
+    merge_id,
+    report_name,
+    starts_with("llm"),
+    starts_with("non_exp"),
+    starts_with("exp_group"),
+    starts_with("exp_disc"),
+  )
+```
+
+# Split report_name 
+split report_name into company name and report year
+```{r}
+annotations <- annotations %>%
+  separate(
+  report_name, c("company_name", "report_year", "suffix"), sep = "_", remove = FALSE) %>%
+  select(-report_name, -suffix)
+```
+
+Correct discrepancy between report_name and company_name for "vital energy" to "uniper"
+```{r}
+annotations <- annotations %>%
+  mutate(company_name = ifelse(grepl("vital energy", company_name), "uniper", company_name))
+```
+
+# Remove duplicates and arrange by report_name, year, scope, page
+```{r}
+annotations <- annotations %>% distinct() %>% arrange(company_name, report_year, llm_scope, llm_year)
+```
+
+# Save dataset
+```{r}
+write.csv(annotations, "../../data/processed/combined_annotations/annotation_dataset.csv", row.names = FALSE)
+```
