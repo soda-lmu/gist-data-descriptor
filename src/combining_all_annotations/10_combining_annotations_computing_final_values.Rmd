@@ -1,0 +1,978 @@
+---
+title: "10_combiniing_annotations_computing_final_values"
+author: "Anna Steinberg"
+date: "2024-12-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Read data
+```{r}
+annotations <- read.csv("../../data/processed/combined_annotations/annotations.csv")
+```
+
+
+# Compute true entries for all cases
+
+## Agreement analysis
+Reports where non-expert annotators disagreed on value_correct or unit_correct were transferred to the experts.
+
+Combinations that can arise without expert review:
+- agreement on value_correct == "No", but different corrected_value
+- agreement on unit_correct == "No", but different corrected_unit
+- agreement on value_correct and unit_correct, but disagreement on page_correct
+- agreement on value_correct, unit_correct and page_correct on "No", but disagreement on corrected_page
+
+How we compute true values?:
+Compare Value.Ann.1 and Value.Ann.2 (values of non-experts)
+- if agreement => true_value = Value.Ann.1
+- if disagreement => true_value = NA
+  Compute "Value.G1" and "Value.G2"
+  - if agreement => true_value = Value.G1
+  - if disagreement => true_value = True value (from expert discussion)
+
+Same procedure for unit and page  
+
+## Compute FINAL VALUES
+
+```{r}
+annotations <- annotations %>% mutate(
+  Value.Ann.1 = case_when(
+    value_correct_1 == "Yes" | is.na(value_correct_1) ~ llm_value,
+    value_correct_1 == "No" ~ corrected_value_1
+    ),
+  Value.Ann.2 = case_when(
+    value_correct_2 == "Yes" | is.na(value_correct_2) ~ llm_value,
+    value_correct_2 == "No" ~ corrected_value_2
+    ),
+  )
+
+annotations <- annotations %>% mutate(
+  Value.G1 = case_when(
+    Value..Who.is.right..g1 == "Ann1" ~ Value.Ann.1,
+    Value..Who.is.right..g1 == "Ann2" ~ Value.Ann.2,
+    Value..Who.is.right..g1 == "Neither" ~ Value.corrected..fill.in.if.necessary..g1,
+    is.na(Value..Who.is.right..g1) ~ NA),
+  Value.G2 = case_when(
+    Value..Who.is.right..g2 == "Ann1" ~ Value.Ann.1,
+    Value..Who.is.right..g2 == "Ann2" ~ Value.Ann.2,
+    Value..Who.is.right..g2 == "Neither" ~ Value.corrected..fill.in.if.necessary..g2,
+    is.na(Value..Who.is.right..g2) ~ NA),
+)
+```
+
+```{r}
+annotations <- annotations %>% mutate(
+  non_expert_value_agreement = case_when(
+    is.na(Value.Ann.1) & is.na(Value.Ann.2) ~ T,  
+    Value.Ann.1 == Value.Ann.2 ~ T, 
+    .default = F),
+  expert_value_agreement = case_when(
+    is.na(Value.G1) & is.na(Value.G2) ~ T,  
+    Value.G1 == Value.G2 ~ T, 
+    .default = F),
+)
+
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    # non-experts agree and no request for expert review
+    non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No" ~ Value.Ann.1,
+    
+    # non-experts agree and expert review requested and experts agree on value and no discussion
+    non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Value.G1,
+    
+    # non-experts agree and expert review requested and experts agree on value and discussion
+    non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.value,
+    
+    # experts disagreed and found new value ==> use expert discussion value
+    non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == F ~ True.value,
+    
+    # non-experts disagree and experts agree on value and no discussion 
+    non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Value.G1,
+    
+    # non-experts disagree and experts agree on value and discussion
+    non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.value,
+    
+    # non-experts disagree and experts disagree on value and discussion
+    non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == F ~ True.value,
+    
+    # to identify rows that need manual inspection
+    # for example
+    # non-experts disagree and no expert review
+    # non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No"
+    .default = 1234567
+  ),
+)
+```
+
+### Check each case
+
+1. Non-experts agree on value and row is not flagged for expert review (5378 rows)
+We can simply use the value provided by Ann1
+Check that the entries in columns Value.Ann.1 and Value.Ann.2 are the same and that this entry is copied to column true_value
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+2. Non-experts agree on value and row is flagged for expert review (because of disagreement on unit correct or expert requested) and experts agree on value and no discussion (64 rows) 
+Check that the entries in columns Value.Ann.1 and Value.Ann.2 are the same and the entries in Value.G1 and Value.G2 and this value is copied to column true_value
+
+Exceptions:
+- city holding ID 68 => corrected in Section Issues
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+3. Non-experts agree and expert review requested and experts agree on value and discussion (because of unit or page disagreement) (16)
+Check that value in True.value is the same as in true_value
+Exceptions:
+- "kb home" IDs 201-207 not flagged erroneously ==> corrected in section Issues
+- "metro" IDs 327/330 not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+4. Non-experts agreed on value, but expert review requested, experts disagreed and found new value (30)
+Check that value in True.value is the same as in true_value
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+5. Non-experts disagree and experts agree on value and no discussion (106)
+Check that value in Value.G1 is the same as in true_value and True.value is empty
+```{r}
+annotations %>% filter(non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+6. Non-experts disagree and experts agree on value and discussion (because of disagreement on unit or page) (26)
+Check that value in True.value is the same as in true_value
+Exceptions:
+- "healius" IDs 451/452 not flagged erroneously ==> corrected in section Issues
+- "metro ID 332 not flagged erroneously ==> corrected in section Issues
+- "kb home" ID x_63_2019_2lb not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+
+7. Non-experts disagree and experts disagree on value and discussion (50)
+Check that value in True.value is the same as in true_value
+```{r}
+annotations %>% filter(non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+8. Manual inspection needed (12)
+```{r}
+annotations %>% filter(true_value == 1234567) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value, row_expert_requested_by_at_least_one_annotator_or_disagreement)
+```
+Row sum check: 5378 + 64 + 16 + 30 + 106 + 26 + 50 + 12 = 5682
+
+### Resolve issues
+1. Deal with Exceptions in Case 2: Non-experts agree on value and row is flagged for expert review (because of disagreement on unit correct or expert requested) and experts agree on value and no discussion
+
+Exceptions:
+- "city holding" ID 68 => corrected in Section Issues
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+Manual inspection:
+- "city holding" ID 68: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct)
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("city holding", report_name) & ID == "68" ~ Value.Ann.1,
+  .default = true_value))
+```
+
+
+2. Deal with Exceptions in Case 3: Non-experts agree and expert review requested and experts agree on value and discussion (because of unit or page disagreement) (24)
+
+Exceptions:
+- "kb home" IDs 201-207 not flagged erroneously
+- "metro" IDs 327/330 not flagged erroneously
+```{r}
+annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+Manual correction
+- "kb home" IDs: 201-207: Value.Ann.1 (Unit.G1 is correct and Page.Ann.1 is correct)
+- "metro" ID 327/330: Value.G1 (Unit.G1 is correct and Page.G1 is correct)
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("kb home", report_name) & (ID == "201" | ID == "202" | ID == "203" | ID == "204" | ID == "205" | ID == "206" | ID == "207") ~ Value.Ann.1,
+    grepl("metro", report_name) & (ID == "327" | ID == "330") ~ Value.G1,
+    .default = true_value)
+)
+
+```
+
+3. Deal with Exceptions in Case 6: Non-experts disagree and experts agree on value and discussion (because of disagreement on unit or page)
+
+Exceptions:
+- "healius" IDs 451/452 not flagged erroneously ==> corrected in section Issues
+- "metro ID 330/332 not flagged erroneously ==> corrected in section Issues
+- "kb home" ID x_63_2019_2lb not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+Manual inspection:
+- "healius" 451/452: Value.G1 is correct (Unit.G1 is correct and Page.G1 is correct)
+- "metro" 332: Value.G1 is correct (Unit.G1 is correct and Page.G1 is correct)
+- "kb home" x_63_2019_2lb: Value.Ann.1 is correct (Unit.G1 is correct and Page.Ann.2 is correct)
+
+Correction
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("healius", report_name) & (ID == "451" | ID == "452") ~ Value.G1,
+    grepl("metro", report_name) & ID == "332" ~ Value.G1,
+    grepl("kb home", report_name) & grepl("x_63_2019_2lb", ID) ~ Value.Ann.1,
+    .default = true_value)
+)
+```
+
+4. Reports with true_value == 1234567 correspond to reports where non-expert annotators agreed on value_correct, but not on actual value, and thus not transferred to expert review
+We need to choose correct values manually
+```{r}
+annotations %>% filter(non_expert_value_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+Manual inspection:
+- "aixtron" 1056/1058/1088/1089/1091/1092: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct) (will produce duplicates, removed later)
+- "allfunds" 515: True.value is correct (included in this list although in expert discussion because one expert group accidentally annotated this row although it was not flagged yellow)
+- "americold" 771: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct) (for some reason not under Case 1)
+- "inchcape" 1446: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct)
+- "nippn" 133/134: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct) 
+- "sumitomo" 575: Value.Ann.1 is correct (Unit.Ann.1 is correct and Page.Ann.1 is correct) (LLM extracted partial value, Ann.2 summed up ==> should be NA)
+
+Correction
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("aixtron", report_name) & (ID == "1056" | ID == "1058" | ID == "1088" | ID == "1089" | ID == "1091" | ID == "1092") ~ Value.Ann.1,
+    grepl("allfunds", report_name) & ID == "515" ~ True.value,
+    grepl("americold", report_name) & ID == "771" ~ Value.Ann.1,
+    grepl("inchcape", report_name) & (ID == "1446") ~ Value.Ann.1,
+    grepl("nippn", report_name) & (ID == "133" | ID == "134") ~ Value.Ann.1,
+    grepl("sumitomo", report_name) & ID == "575" ~ Value.Ann.1,
+    .default = true_value)
+)
+```
+
+Check that no remaining rows with issues
+```{r}
+annotations %>% filter(true_value == 1234567) %>% select(report_name, ID, corrected_value_1, corrected_value_2, Value.Ann.1, Value.Ann.2, Value..Who.is.right..g1, Value.G1, Value.G2, True.value, true_value)
+```
+
+4. Expert was requested, but no or partial annotation by experts and no transfer to expert discussion
+```{r}
+annotations %>% filter(row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & (is.na(Value..Who.is.right..g1) | is.na(Value..Who.is.right..g2)) & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
+```
+Manual inspection:
+- "city holding" ID 68: already fixed in section Issues
+- "huhtamaki" ID 2: all correct (accidentally flagged for expert review)
+- "dksh" ID x_73_2021_3: Value.Ann.1 (Unit.Ann.1 is correct and Page.Ann.1 is correct) (this row should not have been added by non-expert annotator because already extracted) (will become duplicate)
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("dksh", report_name) & grepl("x_73_2021_3", ID) ~ Value.Ann.1,
+    .default = true_value)
+)
+```
+
+5. Row was not flagged, but still discussed in expert discussion
+"preferred bank" ID 956 ==> True.value
+```{r}
+annotations <- annotations %>% mutate(
+  true_value = case_when(
+    grepl("preferred bank", report_name) & ID == "956" ~ True.value,
+    .default = true_value)
+)
+```
+
+## Compute FINAL UNITS
+```{r}
+annotations <- annotations %>% mutate(
+  Unit.Ann.1 = case_when(
+    unit_correct_1 == "Yes" | is.na(unit_correct_1) ~ llm_unit,
+    unit_correct_1 == "No" ~ corrected_unit_1
+    ),
+  Unit.Ann.2 = case_when(
+    unit_correct_2 == "Yes" | is.na(unit_correct_2) ~ llm_unit,
+    unit_correct_2 == "No" ~ corrected_unit_2
+    ),
+  )
+
+annotations <- annotations %>% mutate(
+  Unit.G1 = case_when(
+    Unit..Who.is.right..g1 == "Ann1" ~ Unit.Ann.1,
+    Unit..Who.is.right..g1 == "Ann2" ~ Unit.Ann.2,
+    Unit..Who.is.right..g1 == "Neither" ~ Unit.corrected..fill.in.if.necessary..g1,
+    is.na(Unit..Who.is.right..g1) ~ NA),
+  Unit.G2 = case_when(
+    Unit..Who.is.right..g2 == "Ann1" ~ Unit.Ann.1,
+    Unit..Who.is.right..g2 == "Ann2" ~ Unit.Ann.2,
+    Unit..Who.is.right..g2 == "Neither" ~ Unit.corrected..fill.in.if.necessary..g2,
+    is.na(Unit..Who.is.right..g2) ~ NA),
+)
+```
+
+```{r}
+annotations <- annotations %>% mutate(
+  non_expert_unit_agreement = case_when(
+    is.na(Unit.Ann.1) & is.na(Unit.Ann.2) ~ T,  
+    Unit.Ann.1 == Unit.Ann.2 ~ T, 
+    .default = F),
+  expert_unit_agreement = case_when(
+    is.na(Unit.G1) & is.na(Unit.G2) ~ T,  
+    Unit.G1 == Unit.G2 ~ T, 
+    .default = F),
+)
+```
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    # non-experts agree and no request for expert review
+    non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No" ~ Unit.Ann.1,
+    
+    # non-experts agree and expert review requested and experts agree on unit and no discussion
+    non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Unit.G1,
+    
+    # non-experts agree and expert review requested and experts agree on unit and discussion
+    non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.unit,
+    
+    # experts disagreed and found new unit ==> use expert discussion unit
+    non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F ~ True.unit,
+    
+    # non-experts disagree and experts agree on unit and no discussion 
+    non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Unit.G1,
+    
+    # non-experts disagree and experts agree on unit and discussion
+    non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.unit,
+    
+    # non-experts disagree and experts disagree on unit and discussion
+    non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F ~ True.unit,
+    
+    # to identify rows that need manual inspection
+    # for example
+    # non-experts disagree and no expert review
+    # non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No"
+    .default = "MANUAL"
+  ),
+)
+```
+
+### Check each case
+
+1. Non-experts agree on unit and row is not flagged for expert review (5352 rows)
+We can simply use the unit provided by Ann1
+Check that the entries in columns Unit.Ann.1 and Unit.Ann.2 are the same and that this entry is copied to column true_unit
+If true_value is NA, true_unit should be NA as well
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+2. Non-experts agree on unit and row is flagged for expert review (because of disagreement on value correct or expert requested) and experts agree on unit and no discussion (55 rows) 
+Check that the entries in columns Unit.Ann.1 and Unit.Ann.2 are the same and the entries in Unit.G1 and Unit.G1 and this value is copied to column true_unit
+If true_value is NA, true_unit should be NA as well
+
+Exception:
+- "city" ID 68 ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+
+3. Non-experts agree and expert review requested and experts agree on unit and discussion (because of value or page disagreement) (12)
+Check that entry in True.unit is the same as in true_unit
+Exceptions:
+- "metro" IDs 330/332 not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+4. Non-experts agreed on unit, but expert review requested, experts disagreed and found new unit (18)
+Check that entry in True.entry is the same as in true_unit
+
+Exceptions:
+- "kb home" IDs 201-207 not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+5. Non-experts disagree and experts agree on unit and no discussion (115)
+Check that entry in Unit.G1 is the same as in true_unit and True.unit is empty
+
+Exceptions:
+- "dksh" ID x_73_2021_3 ==> corrected in Section Issues
+
+```{r}
+annotations %>% filter(non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+6. Non-experts disagree and experts agree on unit and discussion (because of disagreement on value or page) (18)
+Check that entry in True.unit is the same as in true_unit
+```{r}
+annotations %>% filter(non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+7. Non-experts disagree and experts disagree on unit and discussion (74)
+Check that value in True.unit is the same as in true_unit
+
+Exceptions:
+- "healius" IDs 451/452 not flagged erroneously ==> corrected in section Issues
+- "kb home" ID x_63_2019_2lb not flagged erroneously ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+8. Manual inspection needed (38)
+```{r}
+annotations %>% filter(true_unit == "MANUAL") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Row sum check: 5352 + 55 + 12 + 18 + 115 + 18 + 74 + 38 = 5682
+
+### Resolve issues
+1. Deal with Exceptions in Case 2: Non-experts agree on unit and row is flagged for expert review (because of disagreement on value correct or expert requested) and experts agree on unit and no discussion
+
+Exceptions:
+- "city" ID 68 => not annotated although flagged for expert review
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Manual correction:
+- "city" ID 68 => Unit.Ann.1 is correct (Value.Ann.1 is correct and Page.Ann.1 is correct)
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("city", report_name) & ID == "68" ~ Unit.Ann.1,
+    .default = true_unit)
+)
+```
+
+
+2. Deal with Exceptions in Case 3: Non-experts agree and expert review requested and experts agree on unit and discussion (because of value or page disagreement)
+
+Exceptions:
+- "metro" IDs 330/332 not flagged erroneously
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Manual inspection:
+- "metro" IDs 330/332: Unit.G1 is correct (Value.G1 is correct and Page.G1 is correct)
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("metro", report_name) & (ID == "330" | ID == "332") ~ Unit.G1,
+    .default = true_unit)
+)
+```
+
+3. Deal with Exceptions in Case 4: Non-experts agreed on unit, but expert review requested, experts disagreed and found new unit
+
+Exceptions:
+- "kb home" 201-207 not flagged erroneously
+
+```{r}
+annotations %>% filter(non_expert_unit_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+
+Manual inspection:
+- "kb home" IDs 201-207 Unit.G1 is correct
+
+Correction
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("kb home", report_name) & (ID == "201" | ID == "202" | ID == "203" | ID == "204" | ID == "205" | ID == "206" | ID == "207") ~ Unit.G1,
+    .default = true_unit)
+)
+```
+
+4. Deal with Exceptions in Case 5: Non-experts disagree and experts agree on unit and no discussion
+
+Exceptions:
+- "dksh" ID x_73_2021_3
+```{r}
+annotations %>% filter(non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Manual inspection:
+- "dksh" ID x_73_2021_3: Unit.Ann.1 (Value.Ann.1 is correct and Page.Ann.1 is correct) (this row should not have been added by non-expert annotator because already extracted) (will become duplicate)
+
+Correction
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("dksh", report_name) & grepl("x_73_2021_3", ID) ~ Unit.Ann.1,
+    .default = true_unit)
+)
+```
+
+5. Deal with Exceptions in Case 7: Non-experts disagree and experts disagree on unit and discussion
+
+Exceptions:
+- "healius" IDs 451/452 not flagged erroneously 
+- "kb home" ID x_63_2019_2lb not flagged erroneously
+```{r}
+annotations %>% filter(non_expert_unit_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_unit_agreement == F) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Manual inspection:
+- "healius" 451/452: Unit.G1 is correct (Value.G1 is correct and Page.G1 is correct)
+- "kb home" x_63_2019_2lb: Unit.G1 is correct (Value.G1 is correct and Page.G1 is correct)
+
+Correction:
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("healius", report_name) & (ID == "451" | ID == "452") ~ Unit.G1,
+    grepl("kb home", report_name) & grepl("x_63_2019_2lb", ID) ~ Unit.G1,
+    .default = true_unit)
+)
+```
+
+6. Reports with true_unit == "MANUAL" correspond to reports where non-expert annotators agreed on unit_correct, but not on actual unit, and thus not transferred to expert review
+We need to choose correct units manually
+```{r}
+annotations %>% filter(true_unit == "MANUAL") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Manual inspection:
+- "Fresenius" IDs 808/809/828/829: Unit.Ann.2 is correct (difference in spelling "t CO 2" vs. "t CO2" ==> preferred "t CO2")
+- "aixtron" IDs 1056/1058/1088/1089/1091/1092: Unit.Ann.1 is correct (Value.Ann.1 is correct and Page.Ann.1 is correct) (will produce duplicates, removed later)
+- "allfunds" ID 515: True.unit is correct (included in this list although in expert discussion because one expert group accidentally annotated this row although it was not flagged yellow)
+- "balanced" ID 307: Unit.Ann.2 is correct (difference in spelling "Kg" vs. "kg" ==> preferred "kg")
+- "bekaert" IDs 1172/1174/1175: Unit.Ann.2 is correct (difference in spelling "CO 2e" vs. "CO2e" ==> preferred "CO2e")
+- "blackberry" ID 27/28: Unit.Ann.2 is correct (difference in spelling "metric tons of carbon dioxide equivalents (CO2e)" and "metric tons CO2e" ==> preferred "metric tons CO2e")
+- "cardinal energy" IDs 1476/1477/1478: Unit.Ann.2 is correct (difference in spelling "10^3 tonnes" vs. "10^3 tonnes CO2e" ==> preferred "10^3 tonnes CO2e")
+- "inchcape" ID 1446: Unit.Ann.1 is correct (Value.Ann.1 is correct and Page.Ann.1 is correct)
+- "independence 2017" ID 828: Unit.Ann.2 is correct (difference in "Tonnes" vs. "metric tons of CO2e" ==> preferred "metric tons of CO2e")
+- "jetblue" IDs 119/120/121/122/123: Unit.Ann.1 is correct (will produce duplicates, removed later)
+- "nippn" IDs 133/134: Unit.Ann.1 is correct (Value.Ann.1 is correct and Page.Ann.1 is correct)
+- "preferred bank" ID 926: True.unit
+- "preferred bank" ID 946: Unit.G1 (in alignment with other rows)
+- "preferred bank" ID 956: True.unit
+- "rexford" ID 436: Unit.Ann.1 (difference in spelling "MT CO2e" vs. "MT C02e" ==> preferred "MT CO2e")
+- "sumitomo" IDs 575: True.unit
+- "sumitomo" IDs 592-595: Unit.Ann.2 (difference in spelling "t-CO2e" vs. "tCO2e" ==> preferred "tCO2e")
+
+Correction
+```{r}
+annotations <- annotations %>% mutate(
+  true_unit = case_when(
+    grepl("Fresenius", report_name) & (ID == "808" | ID == "809" | ID == "828" | ID == "829") ~ Unit.Ann.2,
+    grepl("aixtron", report_name) & (ID == "1056" | ID == "1058" | ID == "1088" | ID == "1089" | ID == "1091" | ID == "1092") ~ Unit.Ann.1,
+    grepl("allfunds", report_name) & ID == "515" ~ True.unit,
+    grepl("balanced", report_name) & ID == "307" ~ Unit.Ann.2,
+    grepl("bekaert", report_name) & (ID == "1172" | ID == "1174" | ID == "1175") ~ Unit.Ann.2,
+    grepl("blackberry", report_name) & (ID == "27" | ID == "28") ~ Unit.Ann.2,
+    grepl("cardinal energy", report_name) & (ID == "1476" | ID == "1477" | ID == "1478") ~ Unit.Ann.2,
+    grepl("inchcape", report_name) & ID == "1446" ~ Unit.Ann.1,
+    grepl("independence", report_name) & grepl("2017", report_name) & ID == "828" ~ Unit.Ann.2,
+    grepl("jetblue", report_name) & (ID == "119" | ID == "120" | ID == "121" | ID == "122" | ID == "123") ~ Unit.Ann.1,
+    grepl("nippn", report_name) & (ID == "133" | ID == "134") ~ Unit.Ann.1,
+    grepl("preferred bank", report_name) & ID == "926" ~ True.unit,
+    grepl("preferred bank", report_name) & ID == "946" ~ Unit.G1,
+    grepl("preferred bank", report_name) & ID == "956" ~ True.unit,
+    grepl("rexford", report_name) & ID == "436" ~ Unit.Ann.1,
+    grepl("sumitomo", report_name) & ID == "575" ~ True.unit,
+    grepl("sumitomo", report_name) & (ID == "592" | ID == "593" | ID == "594" | ID == "595") ~ Unit.Ann.2, .default = true_unit
+))
+```
+
+Check that true_unit is NA when true_value is NA
+```{r}
+annotations %>% filter(is.na(true_value) & !is.na(true_unit))
+```
+
+Check that non-NA true_value is always accompanied by non-NA true_unit
+Exception:
+- "innospec" ID 501
+```{r}
+annotations %>% filter(is.na(true_unit) & !is.na(true_value)) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+Expert Group 2 accidentally enterred corrected unit under reasoning column
+Check true_unit
+```{r}
+annotations %>% filter(Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g2 == "metric tonnes CO2 equivalent") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
+```
+## Compute FINAL PAGE
+```{r}
+annotations <- annotations %>% mutate(
+  Page.Ann.1 = ifelse(page_correct_1 == "Yes", page_used, corrected_page_1),
+  Page.Ann.2 = ifelse(page_correct_2 == "Yes", page_used, corrected_page_2)
+)
+
+annotations <- annotations %>% mutate(
+  Page.G1 = case_when(
+    !is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.corrected..fill.in.if.necessary..g1,
+    Value..Who.is.right..g1 == "Ann1" & is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.Ann.1,
+    Value..Who.is.right..g1 == "Ann1" & !is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.corrected..fill.in.if.necessary..g1,
+    Value..Who.is.right..g1 == "Ann2" & is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.Ann.2,
+    Value..Who.is.right..g1 == "Ann2" & !is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.corrected..fill.in.if.necessary..g1,
+    Value..Who.is.right..g1 == "Neither" & is.na(Page.corrected..fill.in.if.necessary..g1) ~ NA,
+    Value..Who.is.right..g1 == "Neither" & !is.na(Page.corrected..fill.in.if.necessary..g1) ~ Page.corrected..fill.in.if.necessary..g1
+    ),
+  Page.G2 = case_when(
+    !is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.corrected..fill.in.if.necessary..g2,
+    Value..Who.is.right..g2 == "Ann1" & is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.Ann.1,
+    Value..Who.is.right..g2 == "Ann1" & !is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.corrected..fill.in.if.necessary..g2,
+    Value..Who.is.right..g2 == "Ann2" & is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.Ann.2,
+    Value..Who.is.right..g2 == "Ann2" & !is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.corrected..fill.in.if.necessary..g2,
+    Value..Who.is.right..g2 == "Neither" & is.na(Page.corrected..fill.in.if.necessary..g2) ~ NA,
+    Value..Who.is.right..g2 == "Neither" & !is.na(Page.corrected..fill.in.if.necessary..g2) ~ Page.corrected..fill.in.if.necessary..g2
+  )
+)
+```
+
+```{r}
+annotations <- annotations %>% mutate(
+  non_expert_page_agreement = case_when(
+    is.na(Page.Ann.1) & is.na(Page.Ann.2) ~ T,  
+    Page.Ann.1 == Page.Ann.2 ~ T, 
+    .default = F),
+  expert_page_agreement = case_when(
+    is.na(Page.G1) & is.na(Page.G2) ~ T,  
+    Page.G1 == Page.G2 ~ T, 
+    .default = F),
+)
+```
+
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    # non-experts agree and no request for expert review
+    non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No" ~ Page.Ann.1,
+    
+    # non-experts agree and expert review requested and experts agree on page and no discussion
+    non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Page.G1,
+    
+    # non-experts agree and expert review requested and experts agree on page and discussion
+    non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.page,
+    
+    # experts disagreed and found new page ==> use expert discussion page
+    non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == F ~ True.page,
+    
+    # non-experts disagree and experts agree on page and no discussion 
+    non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F ~ Page.G1,
+    
+    # non-experts disagree and experts agree on page and discussion
+    non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == T ~ True.page,
+    
+    # non-experts disagree and experts disagree on page and discussion
+    non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == F ~ True.page,
+    
+    # to identify rows that need manual inspection
+    # for example
+    # non-experts disagree and no expert review
+    # non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No"
+    .default = "MANUAL"
+  ),
+)
+```
+
+### Check each case
+1. Non-experts agree on page and row is not flagged for expert review (5335 rows)
+We can simply use the page provided by Ann1
+Check that the entries in columns Page.Ann.1 and Page.Ann.2 are the same and that this entry is copied to column true_page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+Exceptions:
+- autoneum ID 566/568: page is set although true value and true unit NA
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+2. Non-experts agree on page and row is flagged for expert review (because of disagreement on value correct or expert requested) and experts agree on page and no discussion (69)
+Check that the entries in columns Page.Ann.1 and Page.Ann.2 are the same and the entries in Page.G1 and Page.G1 and this value is copied to column true_page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+Exceptions:
+- city holding ID 68: non-experts agreed, NA by experts
+
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+3. Non-experts agree and expert review requested and experts agree on page and discussion (5)
+Check that entry in true_page is the same as True.page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+4. Experts disagreed and found new page ==> use expert discussion page (34)
+Check that true_page is the same as True.page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+Exceptions:
+- "metro" ID 330/332 ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+5. Non-experts disagree and experts agree on page and no discussion (101)
+Check that entry in Page.G1 is the same as in true_page and True.page is empty
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+Exceptions:
+- dksh holding ID x_73_2021_3 ==> corrected in Section Issues
+- jetblue ID 106 ==> corrected in Section Issues
+
+```{r}
+annotations %>% filter(non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+6. Non-experts disagree and experts agree on page and discussion (33)
+Check that true_page is the same as True.page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+
+Exceptions:
+- healius ID 451/452 ==> corrected in section Issues
+- kb home ID 201-207 and x_63_2019_2lb ==> corrected in section Issues
+```{r}
+annotations %>% filter(non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+7. Non-experts disagree and experts disagree on page and discussion (50)
+Check that value in True.page is the same as in true_page
+If true_value is NA, true_page should be NA as well
+If true_value is not NA, true_page should be not NA
+```{r}
+annotations %>% filter(non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+8. Manual inspection needed (55)
+```{r}
+annotations %>% filter(true_page == "MANUAL") %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Row sum check: 5335 + 69 + 5 + 34 + 101 + 33 + 50 + 55 = 5682
+
+### Resolve issues
+1. Deal with Exceptions in Case 1: Non-experts agree on page and row is not flagged for expert review
+
+Exceptions:
+- "autoneum" ID 566/568: page is set although true value and true unit NA
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "autoneum" ID 566/568: page should be NA (non-expert annotators made mistake in correcting page for a NA value and unit)
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("autoneum", report_name) & (ID == "566" | ID == "568") ~ NA,
+    .default = true_page)
+)
+```
+
+2. Deal with Exceptions in Case 2: Non-experts agree on page and row is flagged for expert review (because of disagreement on value correct or expert requested) and experts agree on page and no discussion
+
+Exceptions:
+- "city holding" ID 68: non-experts agreed, NA by experts
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "city holding" ID 68: page should be Page.Ann.1, see Issues with value and unit (not annotated although flagged for expert review)
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("city holding", report_name) & ID == "68" ~ Page.Ann.1,
+    .default = true_page)
+)
+```
+
+3. Deal with Exceptions in Case 4: Non-experts agree and expert review requested and experts agree on page and discussion
+Check that entry in true_page is the same as True.page
+
+Exceptions:
+- "metro" ID 330-332 ==> non-expert and experts agree, but no value in True.page
+```{r}
+annotations %>% filter(non_expert_page_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "metro" IDs 330/332: Page.G1 is correct, see Issues of value/unit (not flagged erroneously)
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("metro", report_name) & (ID == "330" | ID == "332") ~ Page.G1,
+    .default = true_page)
+)
+```
+
+4. Deal with Exceptions in Case 5: Non-experts disagree and experts agree on page and no discussion
+
+Exceptions:
+- "dksh" ID x_73_2021_3 ==> corrected in Section Issues
+- "jetblue" ID 106 ==> corrected in Section Issues
+
+```{r}
+annotations %>% filter(non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == F) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "dksh" ID x_73_2021_3: Page.Ann.1 (see Issues with Value and Unit) (this row should not have been added by non-expert annotator because already extracted) (will become duplicate)
+- "jetblue" ID 106: Page should be NA because true_value and true_unit NA (duplicate rows, ID 106 exists twice for some reason)
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("dksh", report_name) & grepl("x_73_2021_3", ID) ~ Page.Ann.1,
+    grepl("jetblue", report_name) & ID == "106" ~ NA,
+    .default = true_page)
+)
+```
+
+
+
+5. Deal with Exceptions in Case 6. Non-experts disagree and experts agree on page and discussion
+
+Exceptions:
+- "healius" ID 451/452 ==> corrected in section Issues
+- "kb home" ID 201-207 and x_63_2019_2lb ==> corrected in section Issues
+
+```{r}
+annotations %>% filter(non_expert_page_agreement == F & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_page_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "healius" ID 451/452: Page.G1 is correct (see Issues with Value and Unit) (not flagged erroneously)
+- "kb home" IDs: 201-207: Page.Ann.1 (see Issues with Value and Unit) (not flagged erroneously)
+- "kb home" x_63_2019_2lb: Page.Ann.1 is correct (see Issues with Value and Unit) (not flagged erroneously)
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("healius", report_name) & (ID == "451" | ID == "452") ~ Page.G1,
+    grepl("kb home", report_name) & (ID == "201" | ID == "202" | ID == "203" | ID == "204" | ID == "205" | ID == "206" | ID == "207") ~ Page.Ann.1,
+    grepl("kb home", report_name) & grepl("x_63_2019_2lb", ID) ~ Page.Ann.1,
+    .default = true_page)
+)
+```
+
+6. Deal with "MANUAL"
+```{r}
+annotations %>% filter(true_page == "MANUAL") %>% select(report_name, ID, Page.Ann.1, Page.Ann.2, Page.G1, Page.G2, True.page, true_page, true_value, true_unit)
+```
+Manual correction:
+- "aixtron" ID 1056/1058/1088/1089/1091/1092: Page.Ann.1 is correct (see Issues with Value and Unit) (will produce duplicates, removed later)
+- "evolution" ID 424-428: Page.Ann.2 is correct (page 44 is page number according to pdf viewer)
+- "freni" ID 48-50/58-60/68-70/78-80: Page.Ann.1 is correct (page 131 is page number according to pdf viewer)
+- "hays" ID 447/467/477 : true_page == NA is correct since true_value and true_unit are NA
+- "inchcape" ID 1446: Page.Ann.1 is correct (see Issues with Value and Unit)
+- "independence 2017" ID 828: Page.Ann.2 is correct (see Issues with Unit)
+- "jetblue" ID 119-123: Page.Ann.1 is correct (see Issues with Unit) (will produce duplicates, removed later)
+- "loomis" ID 688: Page.Ann.2 is correct
+- "morinaga" ID 178/179: true_page == NA is correct since true_value and true_unit are NA
+- "nippn" IDs 133/134: Page.Ann.1 is correct (see Issues with Unit)
+- "smith" ID 1212/1225: Page.Ann.2 is correct (consistent with other scopes)
+- "sumitomo" ID 575: true_page == NA is correct since true_value and true_unit are NA
+- "sumitomo" ID 595: Page.Ann.2 (see Issues with Unit)
+- "simply good" ID 192-196: true_page == NA is correct since true_value and true_unit are NA
+- "vital" ID 339/341/350/352: Page.Ann.2 is correct
+- "vital" ID 340/351: Page.Ann.2 is correct (these data are also available on Page 65, but were not extracted)
+- "vital" ID 362/363: Page.Ann.2 is correct
+```{r}
+annotations <- annotations %>% mutate(
+  true_page = case_when(
+    grepl("aixtron", report_name) & (ID == "1056" | ID == "1058" | ID == "1088" | ID == "1089" | ID == "1091" | ID == "1092") ~ Page.Ann.1,
+    grepl("evolution", report_name) & (ID == "424" | ID == "425" | ID == "426" | ID == "427" | ID == "428") ~ Page.Ann.2,
+    grepl("freni", report_name) & (ID == "48" | ID == "49" | ID == "50" | ID == "58" | ID == "59" | ID == "60" | ID == "68" | ID == "69" | ID == "70" | ID == "78" | ID == "79" | ID == "80") ~ Page.Ann.1,
+    grepl("hays", report_name) & (ID == "447" | ID == "467" | ID == "477") ~ NA,
+    grepl("inchcape", report_name) & ID == "1446" ~ Page.Ann.1,
+    grepl("independence", report_name) & grepl("2017", report_name) & ID == "828" ~ Page.Ann.2,
+    grepl("jetblue", report_name) & (ID == "119" | ID == "120" | ID == "121" | ID == "122" | ID == "123") ~ Page.Ann.1,
+    grepl("loomis", report_name) & (ID == "688") ~ Page.Ann.2,
+    grepl("morinaga", report_name) & (ID == "178" | ID == "179") ~ NA,
+    grepl("nippn", report_name) & (ID == "133" | ID == "134") ~ Page.Ann.1,
+    grepl("smith", report_name) & (ID == "1212" | ID == "1225") ~ Page.Ann.2,
+    grepl("sumitomo", report_name) & ID == "575" ~ NA,
+    grepl("sumitomo", report_name) & ID == "595" ~ Page.Ann.2,
+    grepl("simply good", report_name) & (ID == "192" | ID == "193" | ID == "194" | ID == "195" | ID == "196") ~ NA,
+    grepl("vital", report_name) & (ID == "339" | ID == "341" | ID == "350" | ID == "352") ~ Page.Ann.2,
+    grepl("vital", report_name) & (ID == "340" | ID == "351") ~ Page.Ann.2,
+    grepl("vital", report_name) & (ID == "362" | ID == "363") ~ Page.Ann.2,
+    .default = true_page)
+)
+```
+
+## Remaining issues
+
+### Document expert requested
+@Jacob ==> Qualitative analysis needed
+No row where row_expert_requested == "Yes", but document expert requested
+No annotation by experts in rows, only document-level comments
+```{r}
+annotations %>% group_by(report_name) %>% filter(all(row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") & document_expert_requested_by_at_least_one_annotator == "Yes") %>% distinct(report_name)
+```
+Manual inspection:
+```{r}
+annotations %>% filter(grepl("americold", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "americold" ==> experts confirmed that all values annotated by non-experts are correct
+
+```{r}
+annotations %>% filter(grepl("autoneum", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "autoneum" ==> experts confirmed that all values annotated by non-experts are correct
+
+```{r}
+annotations %>% filter(grepl("freni", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "freni" ==> one group confirms, other confirms only for 2016/2017 and raises issue of missing quantities
+
+```{r}
+annotations %>% filter(grepl("hays", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "hays" => experts confirmed correct annotations by non-experts (LLM summed up values)
+
+```{r}
+annotations %>% filter(grepl("inchcape", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "inchcape" => one group accepts values, other group confirms that not clear ("fugitive missions" included or not)
+
+```{r}
+annotations %>% filter(grepl("independence", report_name) & grepl("2018", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- "independence 2018" ==> experts confirmed correct annotations by non-experts
+
+```{r}
+annotations %>% filter(grepl("rinnai", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+- rinnai corp => expert group thinks that some values could have been extracted
+
+### Transforming rows "x" in ID
+
+```{r}
+annotations %>% filter(grepl("x", ID)) %>% select(report_name, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+Rows with "x" already contain all the necessary information (year, scope, value, unit and page). We can just create a new ID column for each report and label each row this way after removing duplicates. (see script for creating annotation dataset)
+
+Exception:
+- "granite": same year-scope-value-unit combination with two different pages *103 and 103
+```{r}
+annotations %>% filter(grepl("granite", report_name)) %>% select(ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+For consistency with other rows, keep rows with page *103 and delete other two
+```{r}
+annotations <- annotations %>% filter(!(ID == "x_103_2020_1" | ID == "x_112_2020_1"))
+```
+
+### Inspect duplicates
+
+```{r}
+duplicates <- annotations %>% 
+  distinct(report_name, ID, llm_year, llm_scope, true_value, true_unit, true_page) %>% 
+  group_by(report_name, llm_year, llm_scope, true_value, true_unit, true_page) %>%
+  summarise(n = n()) %>%
+  filter(n > 1)
+```
+```{r}
+duplicates <- left_join(duplicates, annotations, by = c("report_name", "llm_year", "llm_scope", "true_value", "true_unit", "true_page")) %>% select(report_name, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+```
+
+# Create merger ID to combine datasets back together later
+```{r}
+merge_IDs <- annotations %>%
+  group_by(report_name, llm_scope, llm_year, true_page) %>%
+  reframe(merge_ID = cur_group_id())
+
+annotations <- left_join(annotations, merge_IDs, by = c("report_name", "llm_scope", "llm_year", "true_page"))
+```
+
+# Check that all rows have a correct merge_ID => Test for one report "aixtron"
+```{r}
+test <- annotations %>% filter(grepl("aixtron", report_name)) %>% select(report_name, llm_scope, llm_year, true_value, true_unit, true_page, merge_ID)
+```
+
+# Save full dataset
+```{r}
+write.csv(annotations, "../../data/processed/combined_annotations/annotations_incl_gold_standard.csv", row.names = FALSE)
+```
