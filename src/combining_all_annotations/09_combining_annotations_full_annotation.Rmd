@@ -192,7 +192,7 @@ swap_values <- function(data, mismatch, non_expert_val, non_expert_check_val, ex
 concerned_variables <- c("value_correct", "corrected_value", "unit_correct", "corrected_unit", "page_correct", "corrected_page", "comment", "record_expert_needed", "document_comment", "document_expert_needed", "metric_name", "reporting_type")
 
 for (var in concerned_variables) {
-  test <- swap_values(annotations, mismatch, var, "value", "Value.Ann")
+  annotations <- swap_values(annotations, mismatch, var, "value", "Value.Ann")
 }
 ```
 
@@ -203,11 +203,30 @@ Check if the swap was successful
 
 More checks
 ```{r}
-test %>% filter(value_correct_1 != Value.correct..Yes.No..Ann.1) %>% select(report_name, value_correct_1, corrected_value_1, Value.correct..Yes.No..Ann.2, Value.corrected.Ann.2, Value.correct..Yes.No..Ann.1, Value.corrected.Ann.1, value_correct_2, corrected_value_2)
+annotations %>% filter(value_correct_1 != Value.correct..Yes.No..Ann.1) %>% select(report_name, value_correct_1, corrected_value_1, Value.correct..Yes.No..Ann.2, Value.corrected.Ann.2, Value.correct..Yes.No..Ann.1, Value.corrected.Ann.1, value_correct_2, corrected_value_2)
 ```
 ```{r}
-test %>% filter(value_correct_2 != Value.correct..Yes.No..Ann.2)
+annotations %>% filter(value_correct_2 != Value.correct..Yes.No..Ann.2)
 ```
+### Remove duplicate columns
+```{r}
+annotations <- annotations %>% select(
+  -value_1, -value_2, -Value.Ann.1, -Value.Ann.2,
+  -Document.comment.Annotator.1, -Document.comment.Annotator.2,
+  -Document.level.expert.adjudication.requested.by.at.least.1.annotator,
+  -row_expert_requested_by_at_least_one_annotator_or_disagreement.y,
+  row_expert_requested_by_at_least_one_annotator_or_disagreement = row_expert_requested_by_at_least_one_annotator_or_disagreement.x,
+  -Value.correct..Yes.No..Ann.1, -Value.corrected.Ann.1, -Corrected.page.Ann.1,
+  -Value.correct..Yes.No..Ann.2, -Value.corrected.Ann.2, -Corrected.page.Ann.2,
+  -Unit.correct..Yes.No..Ann.1, -Unit.corrected.Ann.1,
+  -Unit.correct..Yes.No..Ann.2, -Unit.corrected.Ann.2,
+  -Comment.Ann1, -Comment.Ann2,
+  -Value.Ann.1, -Value.Ann.2,
+  -Unit.Ann.1, -Unit.Ann.2,
+  
+)
+```
+
 
 ### Check expert annotations for discrepancies
 ```{r}
@@ -289,6 +308,8 @@ annotations <- left_join(annotations, expert_discussion, by = c(
   "llm_unit" = "LLM.Unit"
 ))
 ```
+
+Comment: We don't need to resolve the mismatch for expert discussion because the variables Value.Ann.1/2 and Unit.Ann.1/2 from expert annotations were used when creating templates for expert discussion. Thus, mismatch has already been resolved.
 
 # Save combined dataset
 ```{r}
