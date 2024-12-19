@@ -206,3 +206,88 @@ agreement %>% filter(is.na(agreement_exp_w_min_1_non_exp))
 ```{r}
 agreement %>% group_by(agreement_exp_w_min_1_non_exp) %>% summarize(n = n(), .groups = "drop") %>% reframe(percentage = n / sum(n) * 100)
 ```
+<<<<<<< HEAD
+=======
+
+## Unique values and ranges for codebook
+
+```{r}
+# llm page
+unique(ads$llm_page)
+
+# llm year
+summary(ads$llm_year)
+
+# llm value
+summary(ads$llm_value)
+
+# llm unit
+unique(ads$llm_unit)
+
+# non exp corrected value
+summary(ads$non_exp_1_corrected_value)
+summary(ads$non_exp_2_corrected_value)
+
+# non exp corrected unit
+unique(ads$non_exp_1_corrected_unit)
+unique(ads$non_exp_2_corrected_unit)
+
+# non exp corrected page
+unique(ads$non_exp_1_corrected_page)
+unique(ads$non_exp_2_corrected_page)
+
+# non exp metric name
+unique(ads$non_exp_1_metric_name)
+unique(ads$non_exp_2_metric_name)
+
+# non exp display type
+unique(ads$non_exp_1_display_type)
+unique(ads$non_exp_2_display_type)
+
+# non exp value
+summary(ads$non_exp_1_value)
+summary(ads$non_exp_2_value)
+
+# non exp unit
+unique(ads$non_exp_1_unit)
+unique(ads$non_exp_2_unit)
+
+# non exp page
+unique(ads$non_exp_1_page)
+unique(ads$non_exp_2_page)
+
+# exp group corrected value
+summary(ads$exp_group_1_corrected_value)
+summary(ads$exp_group_2_corrected_value)
+
+# exp group corrected unit
+unique(ads$exp_group_1_corrected_unit)
+unique(ads$exp_group_2_corrected_unit)
+
+# exp group corrected page
+unique(ads$exp_group_1_corrected_page)
+unique(ads$exp_group_2_corrected_page)
+
+# exp group value
+summary(ads$exp_group_1_value)
+summary(ads$exp_group_2_value)
+
+# exp group unit
+unique(ads$exp_group_1_unit)
+unique(ads$exp_group_2_unit)
+
+# exp group page
+unique(ads$exp_group_1_page)
+unique(ads$exp_group_2_page)
+
+# exp disc value
+summary(ads$exp_disc_value)
+
+# exp disc unit
+unique(ads$exp_disc_unit)
+
+# exp disc page
+unique(ads$exp_disc_page)
+```
+
+>>>>>>> 930d363 (feat: adapt descriptives to new structure and add codebooks metrics)
