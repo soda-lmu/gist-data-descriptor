@@ -19,21 +19,23 @@ annotations <- read.csv("../../data/processed/combined_annotations/annotations.c
 ## Agreement analysis
 Reports where non-expert annotators disagreed on value_correct or unit_correct were transferred to the experts.
 
+
+*How do we compute true values?:*
+Compare Value.Ann.1 and Value.Ann.2 (values of non-experts)
+- if agreement => true_value = Value.Ann.1
+- if disagreement => true_value = NA
+  Compute "Value.G1" and "Value.G2" (expert groups 1 and 2)
+  - if agreement => true_value = Value.G1
+  - if disagreement => true_value = True value (from expert discussion)
+  
+
+Same procedure for unit and page  
+
 Combinations that can arise without expert review:
 - agreement on value_correct == "No", but different corrected_value
 - agreement on unit_correct == "No", but different corrected_unit
 - agreement on value_correct and unit_correct, but disagreement on page_correct
 - agreement on value_correct, unit_correct and page_correct on "No", but disagreement on corrected_page
-
-How we compute true values?:
-Compare Value.Ann.1 and Value.Ann.2 (values of non-experts)
-- if agreement => true_value = Value.Ann.1
-- if disagreement => true_value = NA
-  Compute "Value.G1" and "Value.G2"
-  - if agreement => true_value = Value.G1
-  - if disagreement => true_value = True value (from expert discussion)
-
-Same procedure for unit and page  
 
 ## Compute FINAL VALUES
 
@@ -126,8 +128,8 @@ annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by
 3. Non-experts agree and expert review requested and experts agree on value and discussion (because of unit or page disagreement) (16)
 Check that value in True.value is the same as in true_value
 Exceptions:
-- "kb home" IDs 201-207 not flagged erroneously ==> corrected in section Issues
-- "metro" IDs 327/330 not flagged erroneously ==> corrected in section Issues
+- "kb home" IDs 201-207 not flagged erroneously ==> corrected in section "Issues"
+- "metro" IDs 327/330 not flagged erroneously ==> corrected in section "Issues"
 ```{r}
 annotations %>% filter(non_expert_value_agreement == T & row_expert_requested_by_at_least_one_annotator_or_disagreement == "Yes" & expert_value_agreement == T & row_disagreement_value_unit_page_or_unclear == T) %>% select(report_name, ID, Value.Ann.1, Value.Ann.2, Value.G1, Value.G2, True.value, true_value)
 ```
@@ -581,7 +583,7 @@ Exception:
 ```{r}
 annotations %>% filter(is.na(true_unit) & !is.na(true_value)) %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
 ```
-Expert Group 2 accidentally enterred corrected unit under reasoning column
+Expert Group 2 accidentally entered corrected unit under reasoning column
 Check true_unit
 ```{r}
 annotations %>% filter(Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g2 == "metric tonnes CO2 equivalent") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
@@ -886,7 +888,7 @@ annotations <- annotations %>% mutate(
 ## Remaining issues
 
 ### Document expert requested
-@Jacob ==> Qualitative analysis needed
+
 No row where row_expert_requested == "Yes", but document expert requested
 No annotation by experts in rows, only document-level comments
 ```{r}
@@ -896,12 +898,12 @@ Manual inspection:
 ```{r}
 annotations %>% filter(grepl("americold", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
 ```
-- "americold" ==> experts confirmed that all values annotated by non-experts are correct
+- "americold" ==> experts confirmed that the values annotated by non-experts are correct
 
 ```{r}
 annotations %>% filter(grepl("autoneum", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
 ```
-- "autoneum" ==> experts confirmed that all values annotated by non-experts are correct
+- "autoneum" ==> experts confirmed that the values annotated by non-experts are correct
 
 ```{r}
 annotations %>% filter(grepl("freni", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
@@ -956,6 +958,8 @@ duplicates <- annotations %>%
 ```
 ```{r}
 duplicates <- left_join(duplicates, annotations, by = c("report_name", "llm_year", "llm_scope", "true_value", "true_unit", "true_page")) %>% select(report_name, ID, llm_year, llm_scope, true_value, true_unit, true_page)
+
+duplicates
 ```
 
 # Create merger ID to combine datasets back together later

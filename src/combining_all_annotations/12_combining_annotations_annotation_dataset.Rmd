@@ -7,7 +7,7 @@ output: distill::distill_article
 
 # Goal of the script: Create annotation dataset for publication
 
-# Load libraries
+## Load libraries
 ```{r}
 library(tidyverse)
 library(readxl)
@@ -17,13 +17,13 @@ library(readxl)
 source("../pivot.R")
 ```
 
-# Load dataset
+## Load dataset
 ```{r}
 annotations <- read.csv("../../data/processed/combined_annotations/annotations_incl_gold_standard.csv")
 cleaned_data <- read.csv("../../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
 ```
 
-# Add the following columns:
+## Add the following columns:
 - value_reasoning
 - unit_reasoning
 
@@ -39,14 +39,14 @@ pages_searched <- cleaned_data %>% select(report_name, pages_searched) %>% disti
 annotations <- left_join(annotations, pages_searched, by = c("report_name"))
 ```
 
-# Change ID column
+## Change ID column
 ```{r}
 annotations <- annotations %>% 
   mutate(non_exp_manually_added_record = ifelse(grepl("x", ID), TRUE, FALSE)) # manually added rows start with "x"
 ```
 
 
-# Rename columns
+## Rename columns
 ```{r}
 annotations <- annotations %>% 
   rename(
@@ -117,7 +117,7 @@ annotations <- annotations %>%
   )
 ```
 
-# Rearrange columns
+## Rearrange columns
 ```{r}
 annotations <- annotations %>%
   select(-contains("agreement")) %>%
@@ -131,7 +131,7 @@ annotations <- annotations %>%
   )
 ```
 
-# Split report_name 
+## Split report_name 
 split report_name into company name and report year
 ```{r}
 annotations <- annotations %>%
@@ -146,12 +146,12 @@ annotations <- annotations %>%
   mutate(company_name = ifelse(grepl("vital energy", company_name), "uniper", company_name))
 ```
 
-# Remove duplicates and arrange by report_name, year, scope, page
+## Remove duplicates and arrange by report_name, year, scope, page
 ```{r}
 annotations <- annotations %>% distinct() %>% arrange(company_name, report_year, llm_scope, llm_year)
 ```
 
-# Save dataset
+## Save dataset
 ```{r}
 write.csv(annotations, "../../data/processed/combined_annotations/annotation_dataset.csv", row.names = FALSE)
 ```

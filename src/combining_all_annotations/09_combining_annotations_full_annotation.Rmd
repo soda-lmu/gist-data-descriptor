@@ -8,7 +8,7 @@ output: distill::distill_article
 # Goal of the script: Create full annotation dataset 
 
 Combine non-expert, expert annotations and expert discussion into one dataset and compute final values, units and pages. For each type (value, unit, page) the procedure is rather complex, so for each type the final entry is first computed using complex if-conditions, then every condition is checked manually and issues are resolved manually. 
-The resulting full annotations dataframe is used to create gold standard and annotations dataset. The combine the datasets back together a merge id is created. 
+The resulting full annotations dataframe is used to create the gold standard and the annotation dataset. To combine the datasets back together a merge id is created. 
 
 # Load libraries
 ```{r}
@@ -75,7 +75,7 @@ non_expert_annotations <- non_expert_annotations %>%
 expert_annotations <- read.csv("../../data/processed/expert_discussion/expert_disagreement.csv")
 ```
 
-Remove agreement variables and true variables
+Remove agreement variables and true variables (value, unit and page)
 ```{r}
 expert_annotations <- expert_annotations %>% 
   # will be recomputed
@@ -108,7 +108,7 @@ annotations <- left_join(non_expert_annotations, expert_annotations, by = c(
 ```
 
 ### Solve mismatch
-For some reason, in the expert annotations the columns of the non-experts are sometimes switched compared to the non-expert annotations. We need to resolve this by 
+In the expert annotations the columns of the non-experts are sometimes switched compared to the non-expert annotations. We need to resolve this by 
 1) identifying the reports which are concerned
 2) swapping the columns in those reports
 
@@ -201,7 +201,7 @@ Check if the swap was successful
 #annotations %>% filter(report_name %in% mismatch$report_name) %>% select(report_name, ID, value_1, value_2, Value.Ann.1, Value.Ann.2)
 ```
 
-More checks
+More checks. If it worked we expect 0 observations here.
 ```{r}
 annotations %>% filter(value_correct_1 != Value.correct..Yes.No..Ann.1) %>% select(report_name, value_correct_1, corrected_value_1, Value.correct..Yes.No..Ann.2, Value.corrected.Ann.2, Value.correct..Yes.No..Ann.1, Value.corrected.Ann.1, value_correct_2, corrected_value_2)
 ```
@@ -228,7 +228,7 @@ annotations <- annotations %>% select(
 ```
 
 
-### Check expert annotations for discrepancies
+### Check expert annotations for discrepancies.
 ```{r}
 annotations %>% filter(is.na(Value..Who.is.right..g1) & !is.na(Value.corrected..fill.in.if.necessary..g1))
 ```
@@ -278,6 +278,7 @@ for (file in files) {
 }
 
 ```
+
 Correct true columns
 ```{r}
 expert_discussion <- expert_discussion %>%

@@ -9,8 +9,8 @@ output: distill::distill_article
 
 Columns of gold standard dataset:
 - report name
-- report type (annual vs. sustainability)
-- url
+- report type (e.g., annual report, sustainability report)
+- report url
 - year
 - scope
 - page
@@ -18,7 +18,7 @@ Columns of gold standard dataset:
 - unit
 - unit (normalized)
 - metric name (optionally separated by "/")
-- display type (Table, Text, Graphic) (optionally separated by "/")
+- display type (e.g., table, text, graphic) (optionally separated by "/")
 - raw extracted text from page (column: PageTextsToLLM in cleaned_data)
 
 # Load libraries
@@ -52,19 +52,6 @@ gold_standard <- annotations %>%
 
 
 ## Adding additional columns
-Columns of gold standard dataset:
-- report name
-- report type (annual vs. sustainability)
-- url
-- year
-- scope
-- page
-- value
-- unit
-- unit (normalized)
-- metric name (optionally separated by "/")
-- display type (Table, Text, Graphic) (optionally separated by "/")
-- raw extracted text from page (column: PageTextsToLLM in cleaned_data)
 
 ### Metric name and display type
 
@@ -102,7 +89,7 @@ Manual inspection:
 -   some annotators also report unit in metric_name
 -   uppercase/lowercase spelling of Emissions or Scope
 -   footnote copied (e.g. "(CO2)*", "directc", "e)1", "**")
--   various nomenclature for scope 1, 2, 3 ==>interesting for error analysis
+-   various nomenclature for Scope 1, 2, 3 ==>interesting for error analysis
 
 Correction:
 ```{r}
@@ -157,6 +144,7 @@ gs_metricname_displaytype <- gs_metricname_displaytype %>%
 
 gs_metricname_displaytype <- gs_metricname_displaytype %>% select(report_name, year, scope, page, value, unit, metric_name, display_type, merge_id) 
 ```
+
 If value is NA, metric_name and display_type should be NA as well
 ```{r}
 gs_metricname_displaytype <- gs_metricname_displaytype %>%
@@ -210,7 +198,7 @@ gs_unique <- bind_rows(gs_subset, inspect_unique)
 
 
 ### Report type and url
-To add report type and url, we need to load the excel sheet containing this info
+To add report type and url, we need to load the spreadsheet containing this info
 ```{r}
 report_info <- read_excel("../../data/processed/reports_w_URLs_report-type.xlsx")
 ```
