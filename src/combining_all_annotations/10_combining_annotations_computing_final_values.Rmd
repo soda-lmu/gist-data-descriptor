@@ -38,7 +38,12 @@ Combinations that can arise without expert review:
 - agreement on value_correct, unit_correct and page_correct on "No", but disagreement on corrected_page
 
 ## Compute FINAL VALUES
+We first create the values according to each non-expert separately, 
+i.e. checking their decision in value_correct, 
+we select either the value of the LLM or the value the non-expert entered (corrected_value)
 
+Then we inspect the expert review and set the value of each expert group according to their decision in Value..Who.is.right..g1/2
+i.e. choose respective value of non-expert or corrected value of expert group
 ```{r}
 annotations <- annotations %>% mutate(
   Value.Ann.1 = case_when(
@@ -65,6 +70,8 @@ annotations <- annotations %>% mutate(
 )
 ```
 
+Now we compute the agreement of non-experts and expert groups according to the computed values
+and then use the agreement to decide for each case which value to set as final value
 ```{r}
 annotations <- annotations %>% mutate(
   non_expert_value_agreement = case_when(
@@ -289,6 +296,12 @@ annotations <- annotations %>% mutate(
 ```
 
 ## Compute FINAL UNITS
+We first create the units according to each non-expert separately, 
+i.e. checking their decision in unit_correct, 
+we select either the unit of the LLM or the unit the non-expert entered (corrected_unit)
+
+Then we inspect the expert review and set the unit of each expert group according to their decision in Unit..Who.is.right..g1/2
+i.e. choose respective unit of non-expert or corrected unit of expert group
 ```{r}
 annotations <- annotations %>% mutate(
   Unit.Ann.1 = case_when(
@@ -315,6 +328,7 @@ annotations <- annotations %>% mutate(
 )
 ```
 
+Now we compute the agreement of non-experts and expert groups according to the computed units
 ```{r}
 annotations <- annotations %>% mutate(
   non_expert_unit_agreement = case_when(
@@ -328,6 +342,7 @@ annotations <- annotations %>% mutate(
 )
 ```
 
+Then use the agreement to decide for each case which unit to set as final unit
 ```{r}
 annotations <- annotations %>% mutate(
   true_unit = case_when(
@@ -588,7 +603,14 @@ Check true_unit
 ```{r}
 annotations %>% filter(Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g2 == "metric tonnes CO2 equivalent") %>% select(report_name, ID, Unit.Ann.1, Unit.Ann.2, Unit.G1, Unit.G2, True.unit, true_unit, true_value)
 ```
+
 ## Compute FINAL PAGE
+We first create the page according to each non-expert separately, 
+i.e. checking their decision in page_correct, 
+we select either the page of the LLM or the page the non-expert entered (corrected_page)
+
+Then we inspect the expert review and set the page of each expert group according to their decision in Value..Who.is.right..g1/2
+i.e. choose respective page of non-expert or corrected page of expert group
 ```{r}
 annotations <- annotations %>% mutate(
   Page.Ann.1 = ifelse(page_correct_1 == "Yes", page_used, corrected_page_1),
@@ -617,6 +639,7 @@ annotations <- annotations %>% mutate(
 )
 ```
 
+Now we compute the agreement of non-experts and expert groups according to the computed pages
 ```{r}
 annotations <- annotations %>% mutate(
   non_expert_page_agreement = case_when(
@@ -630,6 +653,7 @@ annotations <- annotations %>% mutate(
 )
 ```
 
+Then use the agreement to decide for each case which page to set as final page
 ```{r}
 annotations <- annotations %>% mutate(
   true_page = case_when(
@@ -888,9 +912,10 @@ annotations <- annotations %>% mutate(
 ## Remaining issues
 
 ### Document expert requested
+For some reports, no row was flagged for expert review, but the expert adjudication on document-level was requested.
+For these reports, the experts did not enter any values, but left document-level comments. 
 
-No row where row_expert_requested == "Yes", but document expert requested
-No annotation by experts in rows, only document-level comments
+We inspect these reports manually and decide which values to use according to the experts document-level comments
 ```{r}
 annotations %>% group_by(report_name) %>% filter(all(row_expert_requested_by_at_least_one_annotator_or_disagreement == "No") & document_expert_requested_by_at_least_one_annotator == "Yes") %>% distinct(report_name)
 ```
@@ -909,6 +934,7 @@ annotations %>% filter(grepl("autoneum", report_name)) %>% select(Expert.documen
 annotations %>% filter(grepl("freni", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
 ```
 - "freni" ==> one group confirms, other confirms only for 2016/2017 and raises issue of missing quantities
+We keep all non-experts' values for now and add a note for the data analysis. 
 
 ```{r}
 annotations %>% filter(grepl("hays", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
@@ -919,6 +945,7 @@ annotations %>% filter(grepl("hays", report_name)) %>% select(Expert.document.co
 annotations %>% filter(grepl("inchcape", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
 ```
 - "inchcape" => one group accepts values, other group confirms that not clear ("fugitive missions" included or not)
+We keep non-experts' values.
 
 ```{r}
 annotations %>% filter(grepl("independence", report_name) & grepl("2018", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
@@ -929,6 +956,7 @@ annotations %>% filter(grepl("independence", report_name) & grepl("2018", report
 annotations %>% filter(grepl("rinnai", report_name)) %>% select(Expert.document.comment.g1, Expert.document.comment.g2, ID, llm_year, llm_scope, true_value, true_unit, true_page)
 ```
 - rinnai corp => expert group thinks that some values could have been extracted
+We keep non-experts' values (NA) for now. 
 
 ### Transforming rows "x" in ID
 

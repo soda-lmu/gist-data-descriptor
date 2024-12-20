@@ -84,12 +84,9 @@ expert_annotations <- expert_annotations %>%
   # error in previous dataset, supposed to be character all along
   mutate(Corrected.page.Ann.2 = as.character(Corrected.page.Ann.2)) %>% 
   mutate(Page.corrected..fill.in.if.necessary..g1 = as.character(Page.corrected..fill.in.if.necessary..g1)) #%>% 
-  
-  # only select columns for merging and columns which are new in expert_annotations compared to non_expert annotations
-  #select(Report.Name, ID, Page.used, LLM.Year, LLM.Scope, LLM.Value, LLM.Unit,  ends_with("g1"), ends_with("g2"), row_disagreement_value_unit_page_or_unclear)
 ```
 
-Create identifier for reports passed to expert annotations
+Create list of report names which were passed to expert annotations
 ```{r}
 reports_in_expert_annotations <- expert_annotations %>% select(Report.Name) %>% distinct()
 ```
@@ -108,9 +105,19 @@ annotations <- left_join(non_expert_annotations, expert_annotations, by = c(
 ```
 
 ### Solve mismatch
-In the expert annotations the columns of the non-experts are sometimes switched compared to the non-expert annotations. We need to resolve this by 
+In the expert annotations the columns of the non-experts are sometimes switched compared to the non-expert annotations. 
+For example, for report "aixtron" ID 1056:
+- Value of non-expert 1 according to non-expert annotations data: value_1 = NA 
+- Value of non-expert 2 according to non-expert annotations data: value_2 = 170.80
+- Value of non-expert 1 according to expert annotations data: Value.Ann.1 = 170.80
+- Value of non-expert 2 according to expert annotations data: Value.Ann.2 = NA
+If we now map value_1 to Value.Ann.1, it would be incorrect. This is relevant because the non-expert values 
+in the expert annotations are the reference for the experts' decision which non-expert is right. 
+For more examples, see the dataframe mismatch created below.
+
+We need to resolve this by 
 1) identifying the reports which are concerned
-2) swapping the columns in those reports
+2) swapping the columns value_1/2 according to the entries Value.Ann.1/2 in those reports
 
 1) Identify reports with mismatch
 ```{r}
@@ -279,7 +286,7 @@ for (file in files) {
 
 ```
 
-Correct true columns
+Normalize, set correct variable type for expert discussion data and select variables for merging
 ```{r}
 expert_discussion <- expert_discussion %>%
   # replace string "NA" but actual NA value
@@ -289,9 +296,6 @@ expert_discussion <- expert_discussion %>%
   # transform corrected page to character (previous mistake when reading in data)
   mutate(Corrected.page.Ann.2 = as.character(Corrected.page.Ann.2)) %>% 
   mutate(`Page.corrected.(fill.in.if.necessary).G1` = as.character(`Page.corrected.(fill.in.if.necessary).G1`)) %>%
-  
-  # undo transformation for template filling from boolean strings to boolean values
-  mutate(row_disagreement_value_unit_page_or_unclear = if_else(row_disagreement_value_unit_page_or_unclear ==  "yes", TRUE, FALSE)) %>% 
   
   # select only columns for merging and new columns compared to expert_annotations
   select(`Report Name`, ID, Page.used, LLM.Year, LLM.Scope, LLM.Value, LLM.Unit, True.value, True.unit, True.page, Unresolvable, Comment)
