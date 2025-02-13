@@ -1,7 +1,7 @@
 *.Rproj
-.Rproj.user
-.RData
-.Rhistory
+*.Rproj.user
+*.RData
+*.Rhistory
 
 # MacOS files
 *.DS_Store*
