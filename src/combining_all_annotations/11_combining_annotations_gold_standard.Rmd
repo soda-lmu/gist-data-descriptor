@@ -254,16 +254,22 @@ gs_pagetext <- left_join(gs_normalized, page_text_join, by = c("report_name" = "
 ```
 
 ### Company name and report year
+Correct discrepancy between report_name and actual company_name for "vital energy" to "uniper"
+```{r}
+gs_companyname_reportyear <- gs_pagetext %>% 
+  mutate(report_name = if_else(
+    str_detect(report_name, "vital energy inc_2019_report.pdf"),
+    str_replace(report_name, "vital energy inc", "uniper"),
+    report_name
+    ))
+
+```
+
+Split report_name into company_name and report_year
 ```{r}
 gs_companyname_reportyear <- gs_pagetext %>% separate(
   report_name, c("company_name", "report_year", "suffix"), sep = "_", remove = FALSE) %>%
-  select(-report_name, -suffix)
-```
-
-Correct discrepancy between report_name and company_name for "vital energy" to "uniper"
-```{r}
-gs_companyname_reportyear <- gs_companyname_reportyear %>%
-  mutate(company_name = ifelse(grepl("vital energy", company_name), "uniper", company_name))
+  select(-suffix)
 ```
 
 ### Save gold standard
