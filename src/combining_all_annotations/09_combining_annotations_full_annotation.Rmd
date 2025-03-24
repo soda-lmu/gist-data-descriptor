@@ -316,6 +316,26 @@ annotations <- left_join(annotations, expert_discussion, by = c(
 
 Comment: We don't need to resolve the mismatch for expert discussion because the variables Value.Ann.1/2 and Unit.Ann.1/2 from expert annotations were used when creating templates for expert discussion. Thus, mismatch has already been resolved.
 
+## Inspect page columns
+```{r}
+# Inspect page entries for each page-related column
+
+annotations %>% distinct(page_used)
+annotations %>% distinct(corrected_page_1)
+annotations %>% distinct(corrected_page_2)
+annotations %>% distinct(Page.corrected..fill.in.if.necessary..g1)
+annotations %>% distinct(Page.corrected..fill.in.if.necessary..g2)
+annotations %>% distinct(True.page)
+```
+Remove ".0" from page values for columns Page.corrected..fill.in.if.necessary..g1 and True.page
+```{r}
+annotations <- annotations %>% mutate(
+  Page.corrected..fill.in.if.necessary..g1 = str_replace(Page.corrected..fill.in.if.necessary..g1, "\\.0", ""),
+  True.page = str_replace(True.page, "\\.0", "")
+)
+```
+
+
 # Save combined dataset
 ```{r}
 write.csv(annotations, "../../data/processed/combined_annotations/annotations.csv", row.names = FALSE)
