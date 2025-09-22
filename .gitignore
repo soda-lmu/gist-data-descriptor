@@ -5,3 +5,4 @@
 
 # MacOS files
 *.DS_Store*
+.Rproj.user
