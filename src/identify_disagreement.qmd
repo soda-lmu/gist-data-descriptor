@@ -1,0 +1,191 @@
+---
+title: "Identify disagreement in non-expert annotations"
+format: html
+---
+
+```{r message=FALSE}
+library(tidyverse)
+```
+
+# Identify disagreement between annotators
+
+We cannot use the `annotation_dataset` from Zenodo because it does not contain annotator comments due to privacy issues. Thus, we're repeating the steps to create the annotation dataset, but this time we will not remove annotator comments. After creating the annotation dataset, we will merge it with the gold standard to identify disagreements between annotators for non-NA gold standard values.
+
+## Recreate annotation dataset with comments
+
+```{r}
+# Load datasets
+annotations <- read.csv("../data/processed/combined_annotations/annotations_incl_gold_standard.csv")
+cleaned_data <- read.csv("../data/processed/non_expert_annotations/non_expert_annotations_cleaned.csv")
+
+# Load helper functions
+source("pivot.R")
+
+# Add the following columns:
+# - value_reasoning
+# - unit_reasoning
+pivot_vars <- c("value_reasoning", "unit_reasoning")
+missing_columns <- pivot_w_split(cleaned_data, pivot_vars)
+annotations <- left_join(annotations, missing_columns, by = c("report_name", "ID", "page_used", "llm_year", "llm_scope", "llm_value", "llm_unit", "annotator_ID_1", "annotator_ID_2"))
+
+# Add pages_searched
+pages_searched <- cleaned_data %>% select(report_name, pages_searched) %>% distinct()
+annotations <- left_join(annotations, pages_searched, by = c("report_name"))
+
+# Change ID column
+annotations <- annotations %>% 
+  mutate(non_exp_manually_added_record = ifelse(grepl("x", ID), TRUE, FALSE)) # manually added rows start with "x"
+
+# Rename columns
+annotations <- annotations %>% 
+  rename(
+    llm_page = page_used,
+    non_exp_1_id = annotator_ID_1,
+    non_exp_2_id = annotator_ID_2,
+    non_exp_1_is_value_correct = value_correct_1,
+    non_exp_2_is_value_correct = value_correct_2,
+    non_exp_1_corrected_value = corrected_value_1,
+    non_exp_2_corrected_value = corrected_value_2,
+    non_exp_1_value_reasoning = value_reasoning_1,
+    non_exp_2_value_reasoning = value_reasoning_2,
+    non_exp_1_value = Value.Ann.1,
+    non_exp_2_value = Value.Ann.2,
+    non_exp_1_is_unit_correct = unit_correct_1,
+    non_exp_2_is_unit_correct = unit_correct_2,
+    non_exp_1_corrected_unit = corrected_unit_1,
+    non_exp_2_corrected_unit = corrected_unit_2,
+    non_exp_1_unit_reasoning = unit_reasoning_1,
+    non_exp_2_unit_reasoning = unit_reasoning_2,
+    non_exp_1_unit = Unit.Ann.1,
+    non_exp_2_unit = Unit.Ann.2,
+    non_exp_1_is_page_correct = page_correct_1,
+    non_exp_2_is_page_correct = page_correct_2,
+    non_exp_1_corrected_page = corrected_page_1,
+    non_exp_2_corrected_page = corrected_page_2,
+    non_exp_1_page = Page.Ann.1,
+    non_exp_2_page = Page.Ann.2,
+    non_exp_1_expert_requested_for_rec = record_expert_needed_1,
+    non_exp_2_expert_requested_for_rec = record_expert_needed_2,
+    non_exp_1_expert_requested_for_doc = document_expert_needed_1,
+    non_exp_2_expert_requested_for_doc = document_expert_needed_2,
+    non_exp_1_metric_name = metric_name_1,
+    non_exp_2_metric_name = metric_name_2,
+    non_exp_1_display_type = reporting_type_1,
+    non_exp_2_display_type = reporting_type_2,
+    non_exp_filter_doc = document_expert_requested_by_at_least_one_annotator,
+    non_exp_filter_rec = row_expert_requested_by_at_least_one_annotator_or_disagreement,
+    non_exp_comment_row_1 = comment_1,
+    non_exp_comment_row_2 = comment_2,
+    non_exp_comment_document_1 = document_comment_1,
+    non_exp_comment_document_2 = document_comment_2,
+    exp_group_1_exp_1_id = Expert.ID.1.g1,
+    exp_group_1_exp_2_id = Expert.ID.2.g1,
+    exp_group_2_exp_1_id = Expert.ID.1.g2,
+    exp_group_2_exp_2_id = Expert.ID.2.g2,
+    exp_group_1_value_who_is_right = Value..Who.is.right..g1,
+    exp_group_1_corrected_value = Value.corrected..fill.in.if.necessary..g1,
+    exp_group_1_value_reasoning = Value.Reasoning..select.if.necessary..if.multiple.apply.choose.first..g1,
+    exp_group_1_value = Value.G1,
+    exp_group_2_value_who_is_right = Value..Who.is.right..g2,
+    exp_group_2_corrected_value = Value.corrected..fill.in.if.necessary..g2,
+    exp_group_2_value_reasoning = Value.Reasoning..select.if.necessary..if.multiple.apply.choose.first..g2,
+    exp_group_2_value = Value.G2,
+    exp_group_1_unit_who_is_right = Unit..Who.is.right..g1,
+    exp_group_1_corrected_unit = Unit.corrected..fill.in.if.necessary..g1,
+    exp_group_1_unit_reasoning = Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g1,
+    exp_group_1_unit = Unit.G1,
+    exp_group_2_unit_who_is_right = Unit..Who.is.right..g2,
+    exp_group_2_corrected_unit = Unit.corrected..fill.in.if.necessary..g2,
+    exp_group_2_unit_reasoning = Unit.reasoning...select.if.necessary..if.multiple.apply.choose.first..g2,
+    exp_group_2_unit = Unit.G2,
+    exp_group_1_corrected_page = Page.corrected..fill.in.if.necessary..g1,
+    exp_group_1_page = Page.G1,
+    exp_group_2_corrected_page = Page.corrected..fill.in.if.necessary..g2,
+    exp_group_2_page = Page.G2,
+    exp_group_filter_rec = row_disagreement_value_unit_page_or_unclear,
+    exp_comment_row_1 = Expert.comment.g1,
+    exp_comment_row_2 = Expert.comment.g2,
+    exp_comment_document_1 = Expert.document.comment.g1,
+    exp_comment_document_2 = Expert.document.comment.g2,
+    exp_disc_value = True.value,
+    exp_disc_unit = True.unit,
+    exp_disc_page = True.page,
+    exp_disc_comment = Comment,
+    merge_id = merge_ID
+  )
+
+# Rearrange columns
+annotations <- annotations %>%
+  select(
+    merge_id,
+    report_name,
+    starts_with("llm"),
+    starts_with("non_exp"),
+    starts_with("exp_group"),
+    starts_with("exp_disc"),
+    contains("agreement"),
+  )
+
+# Split report_name 
+# split report_name into company name and report year
+annotations <- annotations %>%
+  separate(
+  report_name, c("company_name", "report_year", "suffix"), sep = "_", remove = FALSE) %>%
+  mutate(report_year = as.integer(report_year)) %>%
+  select(-suffix)
+
+# Correct discrepancy between report_name and company_name for "vital energy" to "uniper"
+annotations <- annotations %>%
+  mutate(company_name = ifelse(grepl("vital energy", company_name), "uniper", company_name))
+
+# Remove duplicates and arrange by report_name, year, scope, page
+annotations <- annotations %>% distinct() %>% arrange(report_name, company_name, report_year, llm_scope, llm_year) %>% relocate(merge_id, .after = last_col())
+```
+
+## Merge gold standard and annotations
+
+```{r message=FALSE}
+# Read new gold standard with ISINs
+gs_new <- read_csv("../data/processed/combined_annotations/gold_standard_with_ISINs_edited.csv")
+```
+
+```{r}
+# Merge datasets
+
+# Add suffix _old to columns report_name and company_name in annotation dataset 
+annotations_join <- annotations |> rename(report_name_old = report_name, company_name_old = company_name)
+
+# Left join since posterior data cleaning removed some rows from gs
+# Keep only entries of annotations where there exists a row in gs
+df <- gs_new |> left_join(annotations_join, 
+                          join_by(report_name_old, company_name_old, report_year, merge_id))
+
+# Check correct merge by comparing unique merge_ids in both datasets
+unique_merge_ids_gs <- unique(gs_new$merge_id)
+unique_merge_ids_annotations <- unique(annotations$merge_id)
+unique_merge_ids_join <- unique(df$merge_id)
+length(unique_merge_ids_gs) == length(unique_merge_ids_join)
+```
+
+## Identify disagreement
+
+```{r}
+# Filter for rows where gs value is not NA
+df_disagreement <- df |> filter(!is.na(value))
+```
+
+Disagreement definition: at least one non-expert annotator disagreed with llm value i.e. `non_exp_1_is_value_correct == "No"` or `non_exp_2_is_value_correct == "No"`
+
+```{r}
+df_disagreement1 <- df_disagreement |> 
+  filter(non_exp_1_is_value_correct == "No" | non_exp_2_is_value_correct == "No") |> 
+  filter(!is.na(non_exp_1_value_reasoning) | !is.na(non_exp_2_value_reasoning) | !is.na(non_exp_comment_row_1) | !is.na(non_exp_comment_row_2)) # meaningful reasoning/comment
+```
+
+Disagreement definition: non-expert annotators disagree with each other, i.e. `non_exp_1_is_value_correct != non_exp_2_is_value_correct`
+
+```{r}
+df_disagreement2 <- df_disagreement |> 
+  filter(non_expert_value_agreement == FALSE) |>
+  filter(!is.na(non_exp_1_value_reasoning) | !is.na(non_exp_2_value_reasoning) | !is.na(non_exp_comment_row_1) | !is.na(non_exp_comment_row_2)) # meaningful reasoning/comment
+```
