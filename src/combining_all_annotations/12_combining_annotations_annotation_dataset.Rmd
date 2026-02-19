@@ -137,7 +137,7 @@ split report_name into company name and report year
 annotations <- annotations %>%
   separate(
   report_name, c("company_name", "report_year", "suffix"), sep = "_", remove = FALSE) %>%
-  select(-report_name, -suffix)
+  select(-suffix)
 ```
 
 Correct discrepancy between report_name and company_name for "vital energy" to "uniper"
@@ -148,7 +148,7 @@ annotations <- annotations %>%
 
 ## Remove duplicates and arrange by report_name, year, scope, page
 ```{r}
-annotations <- annotations %>% distinct() %>% arrange(company_name, report_year, llm_scope, llm_year)
+annotations <- annotations %>% distinct() %>% arrange(report_name, company_name, report_year, llm_scope, llm_year) %>% relocate(merge_id, .after = last_col())
 ```
 
 ## Save dataset
